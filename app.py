@@ -128,16 +128,66 @@ except Exception as e:
     st.warning(f"Cannot compute correlation matrix: {e}")
 
 # ============================================
-# Section C: Panel Unit Root Tests (Placeholder)
+# Section C: Panel Unit Root Tests (Enhanced)
 # ============================================
 
-st.header("C. Panel Unit Root Tests (Placeholder)")
-unit_root_results = pd.DataFrame({
-    "Variable": ["GDP", "Tourism", "Green_Bonds", "CO2"],
-    "LLC p-value": [0.01, 0.02, 0.15, 0.05],
-    "IPS p-value": [0.03, 0.04, 0.20, 0.07],
-})
-st.dataframe(unit_root_results)
+st.header("C. Panel Unit Root Tests")
+
+st.markdown("""
+Select your test level (Level or First Difference), choose the lag length and trend option.
+This section uses the **Levin-Lin-Chu (LLC)** and **Im-Pesaran-Shin (IPS)** tests for panel data stationarity.
+""")
+
+# --- User Controls ---
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    level_choice = st.radio("Select Test Level", ["Level", "First Difference"])
+
+with col2:
+    lag_choice = st.selectbox("Select Number of Lags", options=list(range(0, 6)), index=1)
+
+with col3:
+    trend_choice = st.selectbox(
+        "Select Trend Option",
+        options=["none", "constant", "trend", "trend and constant"],
+        index=1
+    )
+
+# --- Apply transformations if needed ---
+panel_data = data.copy()
+if level_choice == "First Difference":
+    panel_data = panel_data.groupby("Country").diff().dropna()
+    st.info("Using **first-differenced data** for unit root testing.")
+
+# --- Run tests ---
+try:
+    from linearmodels.panel import unitroot
+
+    st.subheader("Results: Levin-Lin-Chu (LLC) and Im-Pesaran-Shin (IPS) Tests")
+
+    for var in panel_data.select_dtypes(include=[np.number]).columns:
+        st.markdown(f"**Variable:** {var}")
+        try:
+            llc_test = unitroot.LevinLinChu(panel_data[var], trend=trend_choice, lags=lag_choice)
+            ips_test = unitroot.ImPesaranShin(panel_data[var], trend=trend_choice, lags=lag_choice)
+
+            llc_res = llc_test.fit()
+            ips_res = ips_test.fit()
+
+            st.write({
+                "LLC Statistic": round(llc_res.stat, 4),
+                "LLC p-value": round(llc_res.pvalue, 4),
+                "IPS Statistic": round(ips_res.stat, 4),
+                "IPS p-value": round(ips_res.pvalue, 4)
+            })
+            st.divider()
+        except Exception as e:
+            st.warning(f"Could not compute test for {var}: {e}")
+
+except Exception as e:
+    st.error(f"Error running unit root tests: {e}")
+
 
 # ============================================
 # Section D: Panel Cointegration Tests
