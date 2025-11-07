@@ -79,15 +79,35 @@ else:
     except Exception as e:
         st.warning(f"Cannot plot scatter matrix: {e}")
 
-    # --- Figure 4: Correlation Heatmap ---
+       # --- Figure 4: Correlation Heatmap ---
     st.subheader("Figure 4: Correlation Heatmap")
+
+    # Color palette selector
+    color_option = st.selectbox(
+        "Select Heatmap Color Palette",
+        options=[
+            "coolwarm", "viridis", "plasma", "magma", "cividis",
+            "Blues", "Greens", "Reds", "Purples", "icefire", "Spectral"
+        ],
+        index=0
+    )
+
     try:
         corr = data[selected_vars].corr()
         fig, ax = plt.subplots()
-        sns.heatmap(corr, annot=True, cmap="coolwarm", center=0)
+        sns.heatmap(
+            corr,
+            annot=True,
+            cmap=color_option,
+            center=0,
+            linewidths=0.5,
+            fmt=".2f"
+        )
+        plt.title(f"Correlation Heatmap ({color_option} palette)")
         st.pyplot(fig)
     except Exception as e:
         st.warning(f"Cannot generate correlation heatmap: {e}")
+
 
 # ============================================
 # Section B: Descriptive and Preliminary Tests
