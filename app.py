@@ -222,26 +222,81 @@ except Exception as e:
 # Section E: Method of Moments Quantile Regression (MMQR)
 # ============================================
 
-st.header("E. Method of Moments Quantile Regression (MMQR) Results (Simulated)")
-mmqr_results = pd.DataFrame({
-    "Quantile (τ)": [0.10, 0.25, 0.50, 0.75, 0.90],
-    "Tourism Coef": [0.12, 0.18, 0.22, 0.29, 0.35],
-    "Green_Bonds Coef": [-0.05, -0.03, 0.00, 0.04, 0.08],
-    "GDP Coef": [0.30, 0.33, 0.36, 0.40, 0.44]
-})
-st.dataframe(mmqr_results)
+# ============================================
+# Section E: Method of Moments Quantile Regression (MMQR)
+# ============================================
 
-# Quantile Coefficient Plot
-st.subheader("Figure 5: Quantile Coefficient Plot")
-fig, ax = plt.subplots()
-ax.plot(mmqr_results["Quantile (τ)"], mmqr_results["Tourism Coef"], marker='o', label="Tourism")
-ax.plot(mmqr_results["Quantile (τ)"], mmqr_results["Green_Bonds Coef"], marker='o', label="Green Bonds")
-ax.plot(mmqr_results["Quantile (τ)"], mmqr_results["GDP Coef"], marker='o', label="GDP")
-ax.set_xlabel("Quantiles")
-ax.set_ylabel("Estimated Coefficients")
-ax.legend()
-st.pyplot(fig)
+import statsmodels.formula.api as smf
 
+st.header("E. Method of Moments Quantile Regression (MMQR)")
+
+# --- Step 1: File Upload ---
+st.write("Upload your dataset to run the MMQR analysis:")
+uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
+
+if uploaded_file is not None:
+    data = pd.read_csv(uploaded_file)
+    st.success("File uploaded successfully!")
+
+    numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
+
+    # --- Step 2: Variable Selection ---
+    dep_var = st.selectbox("Select Dependent Variable", options=numeric_cols)
+    indep_vars = st.multiselect("Select Independent Variables", options=numeric_cols)
+
+    if dep_var and indep_vars:
+        try:
+            # --- Step 3: Run Quantile Regressions for multiple quantiles ---
+            quantiles = [0.10, 0.25, 0.50, 0.75, 0.90]
+            results = []
+
+            for q in quantiles:
+                formula = f"{dep_var} ~ {' + '.join(indep_vars)}"
+                model = smf.quantreg(formula, data)
+                res = model.fit(q=q)
+                params = res.params
+                std_err = res.bse
+                for var in indep_vars:
+                    results.append({
+                        "Variable": var,
+                        "Quantile": q,
+                        "Coefficient": params[var],
+                        "Std. Error": std_err[var]
+                    })
+
+            mmqr_df = pd.DataFrame(results)
+
+            # --- Step 4: Reshape to academic table format ---
+            mmqr_pivot = mmqr_df.pivot(index="Variable", columns="Quantile", values="Coefficient")
+            st.subheader("Table: Method of Moments Quantile Regression (MMQR) Estimates")
+            st.dataframe(mmqr_pivot.style.format("{:.4f}"))
+
+            # --- Step 5: Plot results ---
+            st.subheader("Figure 5: Quantile Coefficient Plot")
+            fig, ax = plt.subplots()
+            for var in indep_vars:
+                ax.plot(quantiles, mmqr_df[mmqr_df["Variable"] == var]["Coefficient"], marker='o', label=var)
+            ax.set_xlabel("Quantiles")
+            ax.set_ylabel("Estimated Coefficients")
+            ax.legend()
+            st.pyplot(fig)
+
+            # --- Step 6: Interpretation ---
+            st.markdown("""
+            **Interpretation of Results:**  
+            The MMQR estimates reveal the heterogeneity of effects across the conditional quantiles of the dependent variable.  
+            Positive coefficients indicate that as the independent variable increases, the dependent variable tends to rise at that quantile level,  
+            while negative coefficients suggest the opposite.  
+            The changing sign or strength across quantiles highlights potential nonlinear relationships that traditional OLS may miss.  
+            """)
+
+        except Exception as e:
+            st.error(f"Error during MMQR estimation: {e}")
+
+    else:
+        st.info("Please select both dependent and independent variables to run MMQR.")
+else:
+    st.info("Awaiting dataset upload...")
 # ============================================
 # Section F: Granger Causality (Placeholder)
 # ============================================
