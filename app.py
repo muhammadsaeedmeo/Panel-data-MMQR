@@ -144,20 +144,6 @@ else:
     else:
         st.warning("Please select at least one independent variable to display correlation.")
 
-
-
-# ============================================
-# Section B: Descriptive and Preliminary Tests
-# ============================================
-
-st.header("B. Descriptive and Preliminary Tests")
-
-st.subheader("Table 1: Descriptive Statistics")
-try:
-    st.dataframe(data[['GDP', 'Tourism', 'Green_Bonds', 'CO2']].describe().T)
-except Exception as e:
-    st.warning(f"Cannot compute descriptive statistics: {e}")
-
 st.subheader("Table 2: Correlation Matrix")
 try:
     st.dataframe(corr)
