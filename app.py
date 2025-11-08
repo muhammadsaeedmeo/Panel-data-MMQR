@@ -167,7 +167,7 @@ try:
         if not indeps:
             st.warning("Please select independent variables first.")
         else:
-            # Prepare data
+            # Prepare data by country
             panel_results = []
             for country, subset in data.groupby("Country"):
                 if subset[dep].isnull().any() or subset[indeps].isnull().any().any():
@@ -181,27 +181,35 @@ try:
             mean_beta = np.mean(betas, axis=0)
             N, k = betas.shape
 
-            # Compute Swamy test statistic components
+            # Compute test statistics
             S = np.sum((betas - mean_beta) ** 2, axis=0)
             delta = N * np.sum(S) / np.sum(mean_beta ** 2)
             delta_adj = (N * delta - k) / np.sqrt(2 * k)
 
-            # Display results
-            st.markdown(f"**Number of Cross-Sections (N):** {N}")
-            st.markdown(f"**Number of Parameters (k):** {k}")
-            st.markdown(f"**Delta Statistic:** {delta:.4f}")
-            st.markdown(f"**Adjusted Delta Statistic:** {delta_adj:.4f}")
+            # Compute p-values (two-tailed from normal distribution)
+            from scipy.stats import norm
+            p_delta = 2 * (1 - norm.cdf(abs(delta)))
+            p_delta_adj = 2 * (1 - norm.cdf(abs(delta_adj)))
 
-            # --- Interpretation line (simple language) ---
-            if abs(delta_adj) > 1.96:
-                st.success("✅ Slopes are *heterogeneous* across cross-sections — meaning the relationship differs among units.")
-                simple_result = "The regression slopes are **not the same** for all cross-sections."
+            # Create a nice result table
+            results_df = pd.DataFrame({
+                "Statistic": ["Δ", "Δ_adj"],
+                "Value": [round(delta, 3), round(delta_adj, 3)],
+                "p-value": [f"{p_delta:.3f}", f"{p_delta_adj:.3f}"]
+            })
+
+            st.write("**Slope Homogeneity Test Results**")
+            st.dataframe(results_df, use_container_width=True)
+
+            # Simple interpretation line
+            if p_delta_adj < 0.05:
+                st.success("Reject the null hypothesis — slopes are *heterogeneous* across cross-sections.")
+                st.markdown("**Interpretation:** The regression slopes are not the same for all cross-sections.")
             else:
-                st.info("ℹ️ Slopes are *homogeneous* across cross-sections — meaning the relationship is broadly similar across units.")
-                simple_result = "The regression slopes are **similar** across cross-sections."
+                st.info("Fail to reject the null hypothesis — slopes are *homogeneous* across cross-sections.")
+                st.markdown("**Interpretation:** The regression slopes are broadly similar across cross-sections.")
 
-            st.markdown(f"**Summary:** {simple_result}")
-
+            # Reference
             st.caption(
                 "Reference: Pesaran, M. H., & Yamagata, T. (2008). "
                 "Testing slope homogeneity in large panels. *Journal of Econometrics*, 142(1), 50–93."
