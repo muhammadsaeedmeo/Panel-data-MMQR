@@ -238,6 +238,10 @@ except Exception as e:
 # Section D: MMQR Analysis
 # ============================================
 
+# ============================================
+# Section D: MMQR Analysis (Revised)
+# ============================================
+
 st.header("D. Method of Moments Quantile Regression (MMQR)")
 
 if 'dep_var' not in locals() or 'indep_vars' not in locals() or not indep_vars:
@@ -245,17 +249,19 @@ if 'dep_var' not in locals() or 'indep_vars' not in locals() or not indep_vars:
 else:
     # MMQR configuration
     st.subheader("MMQR Configuration")
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     with col1:
         quantiles = st.text_input("Quantiles (comma-separated)", "0.05,0.25,0.50,0.75,0.95")
         quantiles = [float(q.strip()) for q in quantiles.split(",")]
     with col2:
         bootstrap_ci = st.checkbox("Bootstrap Confidence Intervals", True)
-    with col3:
         n_bootstrap = st.slider("Bootstrap Samples", 100, 1000, 200) if bootstrap_ci else 100
 
-    # Enhanced MMQR Implementation
-    def enhanced_mmqr_estimation(data, y_var, x_vars, quantiles, bootstrap=True, n_boot=200):
+    # Revised MMQR Implementation with separate location and scale for each variable
+    def revised_mmqr_estimation(data, y_var, x_vars, quantiles, bootstrap=True, n_boot=200):
+        """
+        Revised MMQR with location and scale effects for each variable
+        """
         results = {}
         bootstrap_results = {q: [] for q in quantiles}
         
@@ -263,28 +269,30 @@ else:
         X = data[x_vars]
         y = data[y_var]
         
-        # Step 1: Location effect (mean regression)
+        # Step 1: Location effects (mean regression) for each variable
         X_with_const = sm.add_constant(X)
         ols_model = sm.OLS(y, X_with_const).fit()
         location_effects = ols_model.params
         location_pvalues = ols_model.pvalues
         
-        # Step 2: Scale effect (absolute residuals modeling)
+        # Step 2: Scale effects (absolute residuals modeling) for each variable
         residuals = ols_model.resid
         abs_residuals = np.abs(residuals)
         scale_model = sm.OLS(abs_residuals, X_with_const).fit()
         scale_effects = scale_model.params
         scale_pvalues = scale_model.pvalues
         
-        # Store location and scale results
-        location_scale_results = {
-            'location_intercept': location_effects['const'],
-            'location_intercept_pvalue': location_pvalues['const'],
-            'scale_intercept': scale_effects['const'],
-            'scale_intercept_pvalue': scale_pvalues['const']
-        }
+        # Store location and scale results for each variable
+        location_scale_results = {}
+        for var in ['const'] + x_vars:
+            location_scale_results[var] = {
+                'location_coef': location_effects[var],
+                'location_pvalue': location_pvalues[var],
+                'scale_coef': scale_effects[var],
+                'scale_pvalue': scale_pvalues[var]
+            }
         
-        # Step 3: Quantile regression with robust standard errors
+        # Step 3: Quantile regression for each quantile
         for q in quantiles:
             formula = f"{y_var} ~ {' + '.join(x_vars)}"
             q_model = quantreg(formula, data).fit(q=q, vcov='robust')
@@ -295,14 +303,11 @@ else:
                 'coefficients': q_model.params,
                 'pvalues': q_model.pvalues,
                 'conf_int': q_model.conf_int(),
-                'residuals': q_model.resid,
-                'location_effect': location_effects,
-                'scale_effect': scale_effects,
                 'coef_names': coef_names,
                 'quantile': q
             }
         
-        # Bootstrap for joint inference
+        # Bootstrap for confidence intervals
         if bootstrap:
             st.info("Running bootstrap inference... This may take a moment.")
             progress_bar = st.progress(0)
@@ -331,74 +336,79 @@ else:
         
         return results, location_scale_results
 
-    # Run enhanced MMQR
+    # Run revised MMQR
     try:
-        mmqr_results, location_scale_results = enhanced_mmqr_estimation(
+        mmqr_results, location_scale_results = revised_mmqr_estimation(
             df, dep_var, indep_vars, quantiles, bootstrap_ci, n_bootstrap
         )
         
-        # Display Location & Scale Intercept Table
-        st.subheader("Table 2: Location and Scale Intercept Parameters")
+        # ========================
+        # Table 1: Location and Scale Parameters for Each Variable
+        # ========================
+        st.subheader("Table 2: Location and Scale Parameters")
         
-        location_data = {
-            'Parameter': ['Location Intercept', 'Scale Intercept'],
-            'Coefficient': [
-                location_scale_results['location_intercept'],
-                location_scale_results['scale_intercept']
-            ],
-            'P-Value': [
-                location_scale_results['location_intercept_pvalue'],
-                location_scale_results['scale_intercept_pvalue']
-            ],
-            'Significance': [
-                '***' if location_scale_results['location_intercept_pvalue'] < 0.01 else 
-                '**' if location_scale_results['location_intercept_pvalue'] < 0.05 else 
-                '*' if location_scale_results['location_intercept_pvalue'] < 0.1 else '',
-                '***' if location_scale_results['scale_intercept_pvalue'] < 0.01 else 
-                '**' if location_scale_results['scale_intercept_pvalue'] < 0.05 else 
-                '*' if location_scale_results['scale_intercept_pvalue'] < 0.1 else ''
-            ]
-        }
+        location_scale_data = []
+        for var in ['const'] + indep_vars:
+            var_name = 'Intercept' if var == 'const' else var
+            location_coef = location_scale_results[var]['location_coef']
+            location_pval = location_scale_results[var]['location_pvalue']
+            scale_coef = location_scale_results[var]['scale_coef']
+            scale_pval = location_scale_results[var]['scale_pvalue']
+            
+            location_scale_data.append({
+                'Variable': var_name,
+                'Location Coef.': f"{location_coef:.3f}",
+                'Location P-value': f"{location_pval:.3f}",
+                'Location Sig.': '***' if location_pval < 0.01 else '**' if location_pval < 0.05 else '*' if location_pval < 0.1 else '',
+                'Scale Coef.': f"{scale_coef:.3f}",
+                'Scale P-value': f"{scale_pval:.3f}",
+                'Scale Sig.': '***' if scale_pval < 0.01 else '**' if scale_pval < 0.05 else '*' if scale_pval < 0.1 else ''
+            })
         
-        location_df = pd.DataFrame(location_data)
-        location_df['Coefficient'] = location_df['Coefficient'].round(4)
-        location_df['P-Value'] = location_df['P-Value'].round(4)
-        st.dataframe(location_df, use_container_width=True)
+        location_scale_df = pd.DataFrame(location_scale_data)
+        st.dataframe(location_scale_df, use_container_width=True)
         
-        # Quantile Results
-        st.subheader("Table 3: MMQR Coefficients with Probability Values")
+        # ========================
+        # Table 2: MMQR Coefficients with Probability Values (Academic Format)
+        # ========================
+        st.subheader("Table 3: MMQR Estimation Results")
         
+        # Create comprehensive results table in academic format
+        academic_results = []
         coef_names = mmqr_results[quantiles[0]]['coef_names']
         
-        results_data = []
         for var in coef_names:
-            row = {'Variable': var}
+            var_name = 'Intercept' if var == 'Intercept' else var
+            row = {'Variable': var_name}
+            
             for q in quantiles:
                 coef = mmqr_results[q]['coefficients'][var]
                 pval = mmqr_results[q]['pvalues'][var]
                 
-                row[f'Q{q}_Coef'] = coef
-                row[f'Q{q}_Pval'] = pval
-                row[f'Q{q}'] = f"{coef:.4f} ({'***' if pval < 0.01 else '**' if pval < 0.05 else '*' if pval < 0.1 else ''})"
+                # Academic format: coefficient with stars and p-value in parentheses
+                stars = '***' if pval < 0.01 else '**' if pval < 0.05 else '*' if pval < 0.1 else ''
+                row[f'τ = {q}'] = f"{coef:.3f}{stars}\n({pval:.3f})"
             
-            results_data.append(row)
+            academic_results.append(row)
         
-        results_df = pd.DataFrame(results_data)
+        academic_df = pd.DataFrame(academic_results)
+        st.dataframe(academic_df, use_container_width=True)
         
-        display_cols = ['Variable'] + [f'Q{q}' for q in quantiles]
-        st.dataframe(results_df[display_cols], use_container_width=True)
-
-        # Coefficient Plot
-        st.subheader("Figure 1: MMQR Coefficient Dynamics")
+        # ========================
+        # Individual Coefficient Plots for Each Variable
+        # ========================
+        st.subheader("Figure 1: MMQR Coefficient Dynamics by Variable")
         
-        fig, axes = plt.subplots(1, 2, figsize=(15, 6))
-        
+        # Create separate plots for each independent variable (excluding intercept)
         plot_vars = [var for var in coef_names if var != 'Intercept']
         
-        for i, var in enumerate(plot_vars):
+        for var in plot_vars:
+            fig, ax = plt.subplots(figsize=(10, 6))
+            
             coefs = [mmqr_results[q]['coefficients'][var] for q in quantiles]
             pvals = [mmqr_results[q]['pvalues'][var] for q in quantiles]
             
+            # Use bootstrap CI if available, else model CI
             if bootstrap_ci and 'bootstrap_ci' in mmqr_results[quantiles[0]]:
                 lower = [mmqr_results[q]['bootstrap_ci']['lower'][var] for q in quantiles]
                 upper = [mmqr_results[q]['bootstrap_ci']['upper'][var] for q in quantiles]
@@ -406,90 +416,219 @@ else:
                 lower = [mmqr_results[q]['conf_int'].loc[var, 0] for q in quantiles]
                 upper = [mmqr_results[q]['conf_int'].loc[var, 1] for q in quantiles]
             
-            line_style = '-' if any(pval < 0.1 for pval in pvals) else '--'
-            line_alpha = 1.0 if any(pval < 0.1 for pval in pvals) else 0.6
+            # Plot main coefficient line
+            line = ax.plot(quantiles, coefs, marker='o', linewidth=2.5, 
+                          label=f'{var} Coefficient', color='#2E86AB')
             
-            axes[0].plot(quantiles, coefs, marker='o', linewidth=2, 
-                       label=var, linestyle=line_style, alpha=line_alpha)
-            axes[0].fill_between(quantiles, lower, upper, alpha=0.2)
+            # Add confidence interval
+            ax.fill_between(quantiles, lower, upper, alpha=0.3, color='#2E86AB')
+            
+            # Add significance markers
+            significant_points = [(q, coef) for q, coef, pval in zip(quantiles, coefs, pvals) if pval < 0.1]
+            if significant_points:
+                sig_quantiles, sig_coefs = zip(*significant_points)
+                ax.scatter(sig_quantiles, sig_coefs, color='red', s=100, zorder=5, 
+                          label='Significant (p < 0.1)')
+            
+            ax.axhline(y=0, color='black', linestyle='--', alpha=0.7, linewidth=1)
+            
+            ax.set_xlabel("Quantiles (τ)", fontsize=12)
+            ax.set_ylabel("Coefficient Estimate", fontsize=12)
+            ax.set_title(f"MMQR Coefficient Dynamics: {var}", fontsize=14, fontweight='bold')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            
+            # Add p-value annotations
+            for i, (q, pval) in enumerate(zip(quantiles, pvals)):
+                sig_text = '***' if pval < 0.01 else '**' if pval < 0.05 else '*' if pval < 0.1 else ''
+                if sig_text:
+                    ax.annotate(sig_text, (q, coefs[i]), textcoords="offset points", 
+                               xytext=(0,10), ha='center', fontweight='bold', color='red')
+            
+            plt.tight_layout()
+            st.pyplot(fig)
+            
+            # Add some space between plots
+            st.markdown("---")
+
+        # ========================
+        # Probability Summary Table
+        # ========================
+        st.subheader("Table 4: Probability Value Summary")
         
-        axes[0].axhline(y=0, color='red', linestyle='--', alpha=0.7)
-        axes[0].set_xlabel("Quantiles (τ)")
-        axes[0].set_ylabel("Coefficient Estimates")
-        axes[0].set_title("MMQR Coefficient Dynamics")
-        axes[0].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        axes[0].grid(True, alpha=0.3)
-        
-        # P-values plot
-        for i, var in enumerate(plot_vars):
+        prob_summary_data = []
+        for var in plot_vars:
             pvals = [mmqr_results[q]['pvalues'][var] for q in quantiles]
-            axes[1].plot(quantiles, pvals, marker='s', linewidth=2, label=var)
+            min_pval = min(pvals)
+            max_pval = max(pvals)
+            mean_pval = np.mean(pvals)
+            significant_quantiles = [f'τ={q}' for q, p in zip(quantiles, pvals) if p < 0.1]
+            
+            prob_summary_data.append({
+                'Variable': var,
+                'Min P-value': f"{min_pval:.3f}",
+                'Max P-value': f"{max_pval:.3f}",
+                'Mean P-value': f"{mean_pval:.3f}",
+                'Significant at': ', '.join(significant_quantiles) if significant_quantiles else 'None',
+                'Overall Significance': 'Yes' if any(p < 0.1 for p in pvals) else 'No'
+            })
         
-        axes[1].axhline(y=0.1, color='orange', linestyle='--', alpha=0.7, label='10% significance')
-        axes[1].axhline(y=0.05, color='red', linestyle='--', alpha=0.7, label='5% significance')
-        axes[1].axhline(y=0.01, color='darkred', linestyle='--', alpha=0.7, label='1% significance')
+        prob_summary_df = pd.DataFrame(prob_summary_data)
+        st.dataframe(prob_summary_df, use_container_width=True)
+
+        # ========================
+        # Download Section with Multiple Formats
+        # ========================
+        st.subheader("Download Results")
         
-        axes[1].set_xlabel("Quantiles (τ)")
-        axes[1].set_ylabel("P-Values")
-        axes[1].set_title("P-Value Dynamics Across Quantiles")
-        axes[1].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
-        axes[1].set_yscale('log')
-        axes[1].grid(True, alpha=0.3)
+        # Format 1: Complete results for Excel
+        download_data = []
         
-        plt.tight_layout()
-        st.pyplot(fig)
+        # Add location and scale parameters
+        for var in ['const'] + indep_vars:
+            var_name = 'Intercept' if var == 'const' else var
+            download_data.append({
+                'Variable': var_name,
+                'Type': 'Location',
+                'Coefficient': round(location_scale_results[var]['location_coef'], 3),
+                'P_Value': round(location_scale_results[var]['location_pvalue'], 3),
+                'Quantile': 'All',
+                'Significance': '***' if location_scale_results[var]['location_pvalue'] < 0.01 else 
+                              '**' if location_scale_results[var]['location_pvalue'] < 0.05 else 
+                              '*' if location_scale_results[var]['location_pvalue'] < 0.1 else ''
+            })
+            
+            download_data.append({
+                'Variable': var_name,
+                'Type': 'Scale',
+                'Coefficient': round(location_scale_results[var]['scale_coef'], 3),
+                'P_Value': round(location_scale_results[var]['scale_pvalue'], 3),
+                'Quantile': 'All',
+                'Significance': '***' if location_scale_results[var]['scale_pvalue'] < 0.01 else 
+                              '**' if location_scale_results[var]['scale_pvalue'] < 0.05 else 
+                              '*' if location_scale_results[var]['scale_pvalue'] < 0.1 else ''
+            })
+        
+        # Add quantile results
+        for var in coef_names:
+            var_name = 'Intercept' if var == 'Intercept' else var
+            for q in quantiles:
+                download_data.append({
+                    'Variable': var_name,
+                    'Type': f'Quantile_τ={q}',
+                    'Coefficient': round(mmqr_results[q]['coefficients'][var], 3),
+                    'P_Value': round(mmqr_results[q]['pvalues'][var], 3),
+                    'Quantile': q,
+                    'Significance': '***' if mmqr_results[q]['pvalues'][var] < 0.01 else 
+                                  '**' if mmqr_results[q]['pvalues'][var] < 0.05 else 
+                                  '*' if mmqr_results[q]['pvalues'][var] < 0.1 else ''
+                })
+        
+        download_df = pd.DataFrame(download_data)
+        
+        # Format 2: Academic table format
+        academic_download = []
+        for var in coef_names:
+            var_name = 'Intercept' if var == 'Intercept' else var
+            row = {'Variable': var_name}
+            for q in quantiles:
+                coef = mmqr_results[q]['coefficients'][var]
+                pval = mmqr_results[q]['pvalues'][var]
+                row[f'Q{q}_Coef'] = round(coef, 3)
+                row[f'Q{q}_Pval'] = round(pval, 3)
+            academic_download.append(row)
+        
+        academic_download_df = pd.DataFrame(academic_download)
+        
+        # Create download buttons
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Complete results
+            csv_complete = download_df.to_csv(index=False)
+            st.download_button(
+                "📥 Download Complete Results (CSV)",
+                data=csv_complete,
+                file_name="MMQR_Complete_Results.csv",
+                mime="text/csv",
+                help="Complete results including location, scale, and quantile parameters"
+            )
+        
+        with col2:
+            # Academic format
+            csv_academic = academic_download_df.to_csv(index=False)
+            st.download_button(
+                "📊 Download Academic Format (CSV)",
+                data=csv_academic,
+                file_name="MMQR_Academic_Format.csv",
+                mime="text/csv",
+                help="Coefficients and p-values in academic table format"
+            )
+        
+        # Copy-paste friendly table
+        st.subheader("Copy-Paste Friendly Table")
+        st.info("Select and copy the table below for easy pasting into Excel or Word:")
+        
+        # Create a simplified table for easy copying
+        copy_table_data = []
+        for var in coef_names:
+            var_name = 'Intercept' if var == 'Intercept' else var
+            row = {'Variable': var_name}
+            for q in quantiles:
+                coef = mmqr_results[q]['coefficients'][var]
+                pval = mmqr_results[q]['pvalues'][var]
+                stars = '***' if pval < 0.01 else '**' if pval < 0.05 else '*' if pval < 0.1 else ''
+                row[f'τ={q}'] = f"{coef:.3f}{stars}"
+            copy_table_data.append(row)
+        
+        copy_table_df = pd.DataFrame(copy_table_data)
+        st.dataframe(copy_table_df, use_container_width=True)
+        
+        # ========================
+        # Interpretation Section
+        # ========================
+        st.subheader("Economic Interpretation")
+        
+        # Location and scale interpretation
+        st.write("**Location and Scale Parameters:**")
+        for var in ['const'] + indep_vars:
+            var_name = 'Intercept' if var == 'const' else var
+            loc_coef = location_scale_results[var]['location_coef']
+            loc_pval = location_scale_results[var]['location_pvalue']
+            scale_coef = location_scale_results[var]['scale_coef']
+            scale_pval = location_scale_results[var]['scale_pvalue']
+            
+            st.write(f"**{var_name}**:")
+            st.write(f"  - Location effect: {loc_coef:.3f} ({'significant' if loc_pval < 0.1 else 'not significant'})")
+            st.write(f"  - Scale effect: {scale_coef:.3f} ({'significant' if scale_pval < 0.1 else 'not significant'})")
+        
+        # Quantile dynamics interpretation
+        st.write("**Quantile-Specific Effects:**")
+        for var in plot_vars:
+            coefs = [mmqr_results[q]['coefficients'][var] for q in quantiles]
+            pvals = [mmqr_results[q]['pvalues'][var] for q in quantiles]
+            
+            # Calculate trend
+            trend = "increasing" if coefs[-1] > coefs[0] else "decreasing" if coefs[-1] < coefs[0] else "stable"
+            
+            # Significance pattern
+            sig_count = sum(1 for p in pvals if p < 0.1)
+            
+            st.write(f"**{var}**:")
+            st.write(f"  - Marginal effect trend: {trend}")
+            st.write(f"  - Coefficient range: {min(coefs):.3f} to {max(coefs):.3f}")
+            st.write(f"  - Significant at {sig_count} out of {len(quantiles)} quantiles")
+            st.write(f"  - Overall significance: {'Yes' if sig_count > 0 else 'No'}")
 
     except Exception as e:
         st.error(f"MMQR estimation failed: {str(e)}")
-
-# ============================================
-# Section E: Diagnostic Tests from MMQR
-# ============================================
-
-st.header("E. Diagnostic Tests")
-
-try:
-    if 'mmqr_results' in locals() and 'location_scale_results' in locals():
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.write("**Location-Scale Diagnostics**")
-            st.metric("Location Intercept", f"{location_scale_results['location_intercept']:.4f}")
-            st.metric("Scale Intercept", f"{location_scale_results['scale_intercept']:.4f}")
-        
-        with col2:
-            st.write("**Quantile Stability**")
-            coef_names = mmqr_results[quantiles[0]]['coef_names']
-            test_vars = [var for var in coef_names if var != 'Intercept']
-            median_coefs = [mmqr_results[0.5]['coefficients'][var] for var in test_vars]
-            q1_coefs = [mmqr_results[0.25]['coefficients'][var] for var in test_vars]
-            q3_coefs = [mmqr_results[0.75]['coefficients'][var] for var in test_vars]
-            
-            diff_low = np.mean(np.abs(np.array(median_coefs) - np.array(q1_coefs)))
-            diff_high = np.mean(np.abs(np.array(median_coefs) - np.array(q3_coefs)))
-            
-            st.metric("Avg difference Q0.25 vs Q0.50", f"{diff_low:.4f}")
-            st.metric("Avg difference Q0.50 vs Q0.75", f"{diff_high:.4f}")
-        
-        with col3:
-            st.write("**Model Significance**")
-            significant_vars = 0
-            test_vars = [var for var in coef_names if var != 'Intercept']
-            total_vars = len(test_vars)
-            
-            for var in test_vars:
-                pvals = [mmqr_results[q]['pvalues'][var] for q in quantiles]
-                if any(pval < 0.1 for pval in pvals):
-                    significant_vars += 1
-            
-            st.metric("Significant Variables", f"{significant_vars}/{total_vars}")
-            st.metric("Location Sig", "Yes" if location_scale_results['location_intercept_pvalue'] < 0.1 else "No")
-            st.metric("Scale Sig", "Yes" if location_scale_results['scale_intercept_pvalue'] < 0.1 else "No")
-    else:
-        st.warning("Please run MMQR analysis first to view diagnostics.")
-except Exception as e:
-    st.warning(f"Diagnostics not available: {str(e)}")
-
+        st.info("""
+        Common issues to check:
+        - Ensure variables have sufficient variation
+        - Check for multicollinearity between independent variables
+        - Verify there are no constant or near-constant variables
+        - Ensure sufficient observations for the number of variables
+        """)
 # ============================================
 # Section F: Panel Granger Causality Test
 # ============================================
