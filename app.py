@@ -543,7 +543,7 @@ if data is not None:
     # ============================================
     # Display Results
     # ============================================
-    if 'mmqr_model' in st.session_state:
+    if 'mmqr_model' in st.session_state and 'var_names' in st.session_state and 'dep_var' in st.session_state:
         mmqr = st.session_state['mmqr_model']
         var_names = st.session_state['var_names']
         dep_var = st.session_state['dep_var']
@@ -759,13 +759,19 @@ if data is not None:
             scale_df.to_excel(writer, sheet_name='Scale Model', index=False)
             mmqr_df.to_excel(writer, sheet_name='MMQR Coefficients', index=False)
         
-        with open('mmqr_complete_results.xlsx', 'rb') as f:
+                        with open('mmqr_complete_results.xlsx', 'rb') as f:
             st.download_button(
                 "📦 Download All Results (Excel)",
                 f.read(),
                 "mmqr_complete_results.xlsx",
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+    
+    else:
+        if independent_vars:
+            st.info("👆 Click 'Run MMQR Analysis' button above to estimate the model and see results.")
+        else:
+            st.warning("⚠️ Please select at least one independent variable to proceed.")
 
 else:
     st.info("📁 Upload a CSV file to begin analysis")
@@ -802,6 +808,7 @@ Estimates unconditional quantile effects using location-scale decomposition:
 
 **Citation:** Machado & Silva (2019), *Journal of Econometrics*, 213(1), 145-173.
 """)
+
 # ============================================
 # Section F: Granger Causality (Placeholder)
 # ============================================
