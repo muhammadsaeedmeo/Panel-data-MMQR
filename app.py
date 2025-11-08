@@ -630,10 +630,6 @@ else:
         - Ensure sufficient observations for the number of variables
         """)
 # ============================================
-# Section F: Panel Granger Causality Test
-# ============================================
-
-# ============================================
 # Section E: Quantile Cointegration Test
 # ============================================
 
@@ -737,6 +733,16 @@ try:
                     result = coint_results[q]
                     critical_vals = result['critical_values']
                     
+                    # Get critical values safely
+                    critical_1p = critical_vals.get('1%', 'N/A')
+                    critical_5p = critical_vals.get('5%', 'N/A')
+                    critical_10p = critical_vals.get('10%', 'N/A')
+                    
+                    # Format critical values
+                    critical_1p_str = f"{critical_1p:.3f}" if critical_1p != 'N/A' else 'N/A'
+                    critical_5p_str = f"{critical_5p:.3f}" if critical_5p != 'N/A' else 'N/A'
+                    critical_10p_str = f"{critical_10p:.3f}" if critical_10p != 'N/A' else 'N/A'
+                    
                     # Determine cointegration decision
                     is_cointegrated = result['p_value'] < significance_level
                     
@@ -744,9 +750,9 @@ try:
                         'Quantile (τ)': f"{q:.2f}",
                         'ADF Statistic': f"{result['adf_statistic']:.3f}",
                         'P-Value': f"{result['p_value']:.3f}",
-                        '1% Critical': f"{critical_vals['1%']:.3f}",
-                        '5% Critical': f"{critical_vals['5%']:.3f}",
-                        '10% Critical': f"{critical_vals['10%] if '10%' in critical_vals else critical_vals.get('10%', 'N/A')}",
+                        '1% Critical': critical_1p_str,
+                        '5% Critical': critical_5p_str,
+                        '10% Critical': critical_10p_str,
                         'Cointegrated': 'Yes' if is_cointegrated else 'No'
                     })
             
@@ -785,8 +791,8 @@ try:
             # Plot 1: ADF Statistics across quantiles
             quantiles_plot = [q for q in coint_quantiles if q in coint_results]
             adf_stats = [coint_results[q]['adf_statistic'] for q in quantiles_plot]
-            critical_1p = [coint_results[q]['critical_values']['1%'] for q in quantiles_plot]
-            critical_5p = [coint_results[q]['critical_values']['5%'] for q in quantiles_plot]
+            critical_1p = [coint_results[q]['critical_values'].get('1%', np.nan) for q in quantiles_plot]
+            critical_5p = [coint_results[q]['critical_values'].get('5%', np.nan) for q in quantiles_plot]
             
             axes[0,0].plot(quantiles_plot, adf_stats, 'o-', linewidth=2, label='ADF Statistic', color='blue')
             axes[0,0].plot(quantiles_plot, critical_1p, '--', linewidth=2, label='1% Critical', color='red')
@@ -825,7 +831,7 @@ try:
             for var in coef_names:
                 if var != 'Intercept':
                     coefs = [coint_results[q]['coefficients'][var] for q in quantiles_plot if q in coint_results]
-                    if coefs:
+                    if coefs and len(coefs) > 1:
                         variation = np.std(coefs) / abs(np.mean(coefs)) if np.mean(coefs) != 0 else np.std(coefs)
                         coef_variation.append((var, variation))
             
@@ -921,8 +927,8 @@ try:
                         'Test_Type': 'Cointegration',
                         'ADF_Statistic': result['adf_statistic'],
                         'P_Value': result['p_value'],
-                        'Critical_1%': result['critical_values']['1%'],
-                        'Critical_5%': result['critical_values']['5%'],
+                        'Critical_1%': result['critical_values'].get('1%', np.nan),
+                        'Critical_5%': result['critical_values'].get('5%', np.nan),
                         'Critical_10%': result['critical_values'].get('10%', np.nan),
                         'Cointegrated': 'Yes' if result['p_value'] < significance_level else 'No',
                         'Ljung_Box_Stat': residual_test.get('ljung_box_stat', np.nan),
@@ -1008,7 +1014,6 @@ except Exception as e:
     - Missing values in the data
     - Multicollinearity between variables
     """)
-
 # ============================================
 # Footer
 # ============================================
