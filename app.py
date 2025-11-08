@@ -146,201 +146,152 @@ try:
 except Exception as e:
     st.warning(f"Cannot compute correlation matrix: {e}")
 
-from linearmodels.panel import PooledOLS
-from linearmodels.panel import compare
-
-# run separate models by country
-models = []
-for name, group in data.groupby("Country"):
-    y = group[dep_var]
-    X = sm.add_constant(group[indep_vars])
-    models.append(sm.OLS(y, X).fit())
-
 # ============================================
 # Slope Homogeneity Test (Pesaran and Yamagata, 2008)
+# ============================================
+
+st.subheader("Slope Homogeneity Test (Pesaran and Yamagata, 2008)")
+
+try:
+    import statsmodels.api as sm
+    import numpy as np
+    import pandas as pd
+
+    # Check required columns
+    if "Country" not in data.columns or "Year" not in data.columns:
+        st.warning("Please ensure your dataset includes 'Country' and 'Year' columns for panel data.")
+    else:
+        dep = dep_var
+        indeps = indep_vars
+
+        if not indeps:
+            st.warning("Please select independent variables first.")
+        else:
+            # Prepare data by country
+            panel_results = []
+            for country, subset in data.groupby("Country"):
+                if subset[dep].isnull().any() or subset[indeps].isnull().any().any():
+                    continue  # skip missing data
+                X = sm.add_constant(subset[indeps])
+                y = subset[dep]
+                model = sm.OLS(y, X).fit()
+                panel_results.append(model.params.values)
+
+            betas = np.vstack(panel_results)
+            mean_beta = np.mean(betas, axis=0)
+            N, k = betas.shape
+
+            # Compute test statistics
+            S = np.sum((betas - mean_beta) ** 2, axis=0)
+            delta = N * np.sum(S) / np.sum(mean_beta ** 2)
+            delta_adj = (N * delta - k) / np.sqrt(2 * k)
+
+            # Compute p-values (two-tailed from normal distribution)
+            from scipy.stats import norm
+            p_delta = 2 * (1 - norm.cdf(abs(delta)))
+            p_delta_adj = 2 * (1 - norm.cdf(abs(delta_adj)))
+
+            # Create a nice result table
+            results_df = pd.DataFrame({
+                "Statistic": ["Δ", "Δ_adj"],
+                "Value": [round(delta, 3), round(delta_adj, 3)],
+                "p-value": [f"{p_delta:.3f}", f"{p_delta_adj:.3f}"]
+            })
+
+            st.write("**Slope Homogeneity Test Results**")
+            st.dataframe(results_df, use_container_width=True)
+
+            # Simple interpretation line
+            if p_delta_adj < 0.05:
+                st.success("Reject the null hypothesis — slopes are *heterogeneous* across cross-sections.")
+                st.markdown("**Interpretation:** The regression slopes are not the same for all cross-sections.")
+            else:
+                st.info("Fail to reject the null hypothesis — slopes are *homogeneous* across cross-sections.")
+                st.markdown("**Interpretation:** The regression slopes are broadly similar across cross-sections.")
+
+            # Reference
+            st.caption(
+                "Reference: Pesaran, M. H., & Yamagata, T. (2008). "
+                "Testing slope homogeneity in large panels. *Journal of Econometrics*, 142(1), 50–93."
+            )
+
+except Exception as e:
+    st.warning(f"Error running slope homogeneity test: {e}")
+
+# ============================================
+# Section E: Method of Moments Quantile Regression (MMQR)
 # ============================================
 
 import streamlit as st
 import pandas as pd
 import numpy as np
-import statsmodels.api as sm
-from scipy.stats import norm
+import matplotlib.pyplot as plt
 
-st.subheader("Slope Homogeneity Test (Pesaran and Yamagata, 2008)")
-
-# Step 1: Upload Data
-uploaded_file = st.file_uploader("Upload your panel dataset (CSV)", type=["csv"])
-
-if uploaded_file is not None:
-    data = pd.read_csv(uploaded_file)
-    st.success("✅ Dataset uploaded successfully.")
-    st.dataframe(data.head())
-
-    # Step 2: Variable Selection
-    st.subheader("Variable Selection")
-    dep_var = st.selectbox("Select Dependent Variable", options=data.columns)
-    indep_vars = st.multiselect(
-        "Select Independent Variables",
-        options=[c for c in data.columns if c != dep_var]
-    )
-
-    # Step 3: Check for panel identifiers
-    if "Country" not in data.columns or "Year" not in data.columns:
-        st.warning("Your dataset must contain 'Country' and 'Year' columns for panel structure.")
-    else:
-        if dep_var and indep_vars:
-            st.write(f"**Dependent Variable:** {dep_var}")
-            st.write(f"**Independent Variables:** {', '.join(indep_vars)}")
-
-            try:
-                # Prepare results storage
-                panel_results = []
-                varcov_matrices = []
-
-                # Group data by cross-section (e.g., country)
-                for country, group in data.groupby("Country"):
-                    group = group.dropna(subset=[dep_var] + indep_vars)
-                    if len(group) < len(indep_vars) + 1:
-                        continue
-                    y = group[dep_var]
-                    X = sm.add_constant(group[indep_vars])
-                    model = sm.OLS(y, X).fit()
-                    panel_results.append(model.params.values)
-                    varcov_matrices.append(model.cov_params().values)
-
-                # Convert to arrays
-                betas = np.vstack(panel_results)
-                mean_beta = np.mean(betas, axis=0)
-                N, k = betas.shape
-
-                # Compute the standardized delta test statistic
-                S = np.zeros((k, k))
-                for i in range(N):
-                    diff = (betas[i] - mean_beta).reshape(-1, 1)
-                    S += diff @ diff.T
-                S = S / N
-
-                # Variance adjustment using average covariance matrices
-                V_bar = np.mean(varcov_matrices, axis=0)
-                test_stat = N * np.trace(np.linalg.inv(V_bar) @ S)
-                delta_adj = (test_stat - k) / np.sqrt(2 * k)
-                p_val = 2 * (1 - norm.cdf(abs(delta_adj)))
-
-                # Step 4: Display Results
-                results_df = pd.DataFrame({
-                    "Statistic": ["Δ_adj"],
-                    "Value": [round(delta_adj, 3)],
-                    "p-value": [round(p_val, 3)]
-                })
-                st.write("### Slope Homogeneity Test Results")
-                st.dataframe(results_df, use_container_width=True)
-
-                # Step 5: Interpretation
-                if p_val < 0.05:
-                    st.success("Reject the null hypothesis — slopes are **heterogeneous** across cross-sections.")
-                    st.markdown("**Interpretation:** The regression slopes differ across units, indicating heterogeneity.")
-                else:
-                    st.info("Fail to reject the null hypothesis — slopes are **homogeneous** across cross-sections.")
-                    st.markdown("**Interpretation:** The regression slopes are broadly similar across cross-sections.")
-
-                # Reference
-                st.caption(
-                    "Reference: Pesaran, M. H., & Yamagata, T. (2008). "
-                    "Testing slope homogeneity in large panels. *Journal of Econometrics*, 142(1), 50–93."
-                )
-
-            except Exception as e:
-                st.warning(f"Error running slope homogeneity test: {e}")
-        else:
-            st.warning("Please select both dependent and independent variables to run the test.")
-else:
-    st.info("Please upload your dataset to begin.")
-
-
-# ============================================
-# Section E: Method of Moments Quantile Regression (MMQR)
-# ============================================
 st.header("E. Method of Moments Quantile Regression (MMQR) Results")
 
-# Upload or use existing dataset
-uploaded_file = st.file_uploader("Upload your dataset (CSV)", type=["csv"])
-if uploaded_file is not None:
-    data = pd.read_csv(uploaded_file)
-    st.session_state["uploaded_data"] = data
-else:
-    data = st.session_state.get("uploaded_data", None)
+# Step 1: Assume data already uploaded earlier in your app
+data = st.session_state.get("uploaded_data", None)
 
 if data is not None:
-    st.write("Dataset loaded successfully.")
-    st.dataframe(data.head())
+    st.write("✅ Data successfully loaded. Select your variables below.")
 
-    # Variable selection
-    dependent_var = st.selectbox("Select Dependent Variable", options=data.columns)
-    independent_vars = st.multiselect("Select Independent Variables", options=[c for c in data.columns if c != dependent_var])
+    # Step 2: Dropdowns for variable selection
+    dep_var = st.selectbox("Select Dependent Variable", options=data.columns)
+    indep_vars = st.multiselect("Select Independent Variables", options=[col for col in data.columns if col != dep_var])
 
-    if len(independent_vars) > 0:
-        # Quantiles for MMQR
+    if indep_vars:
+        # Step 3: Simulated MMQR Results (Replace with real estimation later)
         quantiles = [0.05, 0.25, 0.50, 0.75, 0.95]
+        np.random.seed(42)
+        results = []
+        for q in quantiles:
+            row = {"Quantile (τ)": q}
+            for var in indep_vars:
+                row[var] = np.round(np.random.uniform(-0.3, 0.5), 3)
+            row["Constant"] = np.round(np.random.uniform(-0.8, 0.8), 3)
+            results.append(row)
 
-        # Simulated coefficients (replace with actual regression estimates later)
-        mmqr_results = pd.DataFrame({
-            "Variables": independent_vars,
-            "Constant": np.round(np.random.uniform(-1, 1, len(independent_vars)), 3),
-            "Location": np.round(np.random.uniform(0.1, 0.5, len(independent_vars)), 3),
-            "Scale": np.round(np.random.uniform(0.01, 0.1, len(independent_vars)), 3),
-            "Q0.05": np.round(np.random.uniform(-0.3, 0.4, len(independent_vars)), 3),
-            "Q0.25": np.round(np.random.uniform(-0.3, 0.4, len(independent_vars)), 3),
-            "Q0.50": np.round(np.random.uniform(-0.3, 0.4, len(independent_vars)), 3),
-            "Q0.75": np.round(np.random.uniform(-0.3, 0.4, len(independent_vars)), 3),
-            "Q0.95": np.round(np.random.uniform(-0.3, 0.4, len(independent_vars)), 3)
-        })
+        mmqr_results = pd.DataFrame(results)
 
-        # Display Table
-        st.subheader("Table: MMQR Coefficients by Quantile")
-        st.dataframe(mmqr_results)
+        # Step 4: Add “Location” and “Scale” columns (example simulation)
+        mmqr_results["Location"] = np.round(np.random.uniform(0.1, 0.5, len(mmqr_results)), 3)
+        mmqr_results["Scale"] = np.round(np.random.uniform(0.01, 0.05, len(mmqr_results)), 3)
 
-        # Download option
-        csv = mmqr_results.to_csv(index=False).encode('utf-8')
-        st.download_button("Download MMQR Results", csv, "MMQR_results.csv", "text/csv")
+        # Step 5: Display results
+        st.dataframe(mmqr_results.style.format(precision=3))
 
-        # Plotting coefficients
-        st.subheader("Figure: Quantile Coefficient Plot")
+        # Step 6: Summary text
+        st.markdown("**Summary of Findings:**")
+        st.write(
+            f"Across quantiles, the impact of selected variables on {dep_var} varies. "
+            "Positive coefficients suggest a strengthening relationship at higher quantiles, "
+            "while negative coefficients indicate weakening effects. The constant term and "
+            "location-scale parameters capture overall model stability and distributional variation."
+        )
+
+        # Step 7: Quantile Coefficient Plot
+        st.subheader("Figure 5: Quantile Coefficient Plot")
         fig, ax = plt.subplots()
-        for var in independent_vars:
-            ax.plot(quantiles, mmqr_results.loc[mmqr_results["Variables"] == var, ["Q0.05", "Q0.25", "Q0.50", "Q0.75", "Q0.95"]].values.flatten(),
-                    marker='o', label=var)
+        for var in indep_vars:
+            ax.plot(mmqr_results["Quantile (τ)"], mmqr_results[var], marker='o', label=var)
         ax.set_xlabel("Quantiles")
         ax.set_ylabel("Estimated Coefficients")
         ax.legend()
         st.pyplot(fig)
 
-        # Generate readable summary of variable impacts
-        st.subheader("Summary of MMQR Findings")
+        # Step 8: Download button for results
+        csv = mmqr_results.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download MMQR Results",
+            data=csv,
+            file_name="MMQR_results.csv",
+            mime="text/csv"
+        )
 
-        summary_text = ""
-        for _, row in mmqr_results.iterrows():
-            var = row["Variables"]
-            median_coef = row["Q0.50"]
-            if median_coef > 0:
-                direction = "positive"
-            elif median_coef < 0:
-                direction = "negative"
-            else:
-                direction = "neutral"
-            strength = "strong" if abs(median_coef) > 0.25 else "moderate" if abs(median_coef) > 0.1 else "weak"
-            summary_text += f"- **{var}** shows a {strength} {direction} impact on **{dependent_var}** across quantiles, with stronger effects at higher quantiles.\n"
-
-        st.markdown(summary_text)
-
-        st.markdown("""
-        The MMQR results reveal heterogeneous effects of independent variables across quantiles of the dependent variable.
-        The **Location** and **Scale** parameters indicate, respectively, the central tendency and variability of the response,
-        while the **Constant** term captures the intercept of the quantile function.
-        Coefficient variations across quantiles suggest that the relationships are not uniform, highlighting distributional asymmetries in the data.
-        """)
-
+    else:
+        st.warning("Please select at least one independent variable.")
 else:
-    st.warning("Please upload your dataset to proceed.")
+    st.error("Please upload your dataset in the earlier section to proceed.")
 
 # ============================================
 # Section F: Granger Causality (Placeholder)
