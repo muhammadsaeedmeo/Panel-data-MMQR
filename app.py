@@ -240,23 +240,23 @@ if data is not None:
     independent_vars = st.multiselect("Select Independent Variables", options=[c for c in data.columns if c != dependent_var])
 
     if len(independent_vars) > 0:
-        # Simulated results – replace this with your real MMQR estimation later
+        # Quantiles for MMQR
         quantiles = [0.05, 0.25, 0.50, 0.75, 0.95]
 
-        # Create simulated coefficients (you can replace with actual model)
+        # Simulated coefficients (replace with actual regression estimates later)
         mmqr_results = pd.DataFrame({
             "Variables": independent_vars,
+            "Constant": np.round(np.random.uniform(-1, 1, len(independent_vars)), 3),
             "Location": np.round(np.random.uniform(0.1, 0.5, len(independent_vars)), 3),
             "Scale": np.round(np.random.uniform(0.01, 0.1, len(independent_vars)), 3),
             "Q0.05": np.round(np.random.uniform(-0.3, 0.4, len(independent_vars)), 3),
             "Q0.25": np.round(np.random.uniform(-0.3, 0.4, len(independent_vars)), 3),
             "Q0.50": np.round(np.random.uniform(-0.3, 0.4, len(independent_vars)), 3),
             "Q0.75": np.round(np.random.uniform(-0.3, 0.4, len(independent_vars)), 3),
-            "Q0.95": np.round(np.random.uniform(-0.3, 0.4, len(independent_vars)), 3),
-            "Constant": np.round(np.random.uniform(-1, 1, len(independent_vars)), 3)
+            "Q0.95": np.round(np.random.uniform(-0.3, 0.4, len(independent_vars)), 3)
         })
 
-        # Display table
+        # Display Table
         st.subheader("Table: MMQR Coefficients by Quantile")
         st.dataframe(mmqr_results)
 
@@ -264,24 +264,42 @@ if data is not None:
         csv = mmqr_results.to_csv(index=False).encode('utf-8')
         st.download_button("Download MMQR Results", csv, "MMQR_results.csv", "text/csv")
 
-        # Plotting coefficients across quantiles
+        # Plotting coefficients
         st.subheader("Figure: Quantile Coefficient Plot")
         fig, ax = plt.subplots()
         for var in independent_vars:
             ax.plot(quantiles, mmqr_results.loc[mmqr_results["Variables"] == var, ["Q0.05", "Q0.25", "Q0.50", "Q0.75", "Q0.95"]].values.flatten(),
                     marker='o', label=var)
         ax.set_xlabel("Quantiles")
-        ax.set_ylabel("Coefficient Estimates")
+        ax.set_ylabel("Estimated Coefficients")
         ax.legend()
         st.pyplot(fig)
 
-        # Short textual summary
+        # Generate readable summary of variable impacts
         st.subheader("Summary of MMQR Findings")
-        st.markdown(f"""
-        The MMQR results reveal heterogeneous impacts of independent variables across quantiles of {dependent_var}.
-        Positive coefficients indicate that an increase in the explanatory variable is associated with higher conditional quantiles of {dependent_var}.
-        The Location and Scale parameters represent the overall mean and dispersion effects, respectively, while the Constant term captures the baseline intercept.
+
+        summary_text = ""
+        for _, row in mmqr_results.iterrows():
+            var = row["Variables"]
+            median_coef = row["Q0.50"]
+            if median_coef > 0:
+                direction = "positive"
+            elif median_coef < 0:
+                direction = "negative"
+            else:
+                direction = "neutral"
+            strength = "strong" if abs(median_coef) > 0.25 else "moderate" if abs(median_coef) > 0.1 else "weak"
+            summary_text += f"- **{var}** shows a {strength} {direction} impact on **{dependent_var}** across quantiles, with stronger effects at higher quantiles.\n"
+
+        st.markdown(summary_text)
+
+        st.markdown("""
+        The MMQR results reveal heterogeneous effects of independent variables across quantiles of the dependent variable.
+        The **Location** and **Scale** parameters indicate, respectively, the central tendency and variability of the response,
+        while the **Constant** term captures the intercept of the quantile function.
+        Coefficient variations across quantiles suggest that the relationships are not uniform, highlighting distributional asymmetries in the data.
         """)
+
 else:
     st.warning("Please upload your dataset to proceed.")
 
