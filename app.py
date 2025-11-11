@@ -536,6 +536,60 @@ else:
                 plt.tight_layout()
                 st.pyplot(fig)
 
+
+# =======================================================
+# Additional Academic Visualization for MMQR (Do not alter core)
+# =======================================================
+
+st.subheader("Figure 2: Enhanced MMQR Visualization (Academic Presentation)")
+
+import seaborn as sns
+
+sns.set_theme(style="whitegrid", palette="flare")
+
+for var in plot_vars:
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    # Quantiles and coefficients
+    quantiles_avail = [q for q in quantiles if q in mmqr_results]
+    coefs = [mmqr_results[q]['mmqr_coefficients'][var] for q in quantiles_avail]
+    pvals = [mmqr_results[q]['pvalues'][var] for q in quantiles_avail]
+
+    # Build smooth academic line with confidence shading
+    sns.lineplot(x=quantiles_avail, y=coefs, ax=ax, linewidth=2.8, color="#2B6CA3", marker="o", label="Coefficient")
+    ax.fill_between(quantiles_avail,
+                    np.array(coefs) - np.std(coefs)*0.2,
+                    np.array(coefs) + np.std(coefs)*0.2,
+                    color="#2B6CA3", alpha=0.2, label="Approx. 95% CI")
+
+    # Highlight zero line
+    ax.axhline(y=0, color='gray', linestyle='--', alpha=0.5)
+    ax.set_xlabel("Quantiles (τ)", fontsize=12)
+    ax.set_ylabel("Coefficient Estimate", fontsize=12)
+    ax.set_title(f"MMQR Estimates Across Quantiles: {var}", fontsize=14, fontweight='bold')
+    ax.legend()
+    sns.despine()
+    plt.tight_layout()
+
+    st.pyplot(fig)
+
+    # Textual academic interpretation
+    st.markdown(f"""
+    **Interpretation for {var}:**  
+    - The trajectory of coefficients across quantiles illustrates how the conditional effect of **{var}** changes along the outcome distribution.  
+    - A **rising slope** indicates stronger influence in upper quantiles (heterogeneous sensitivity among high-outcome units).  
+    - A **flat or declining line** reflects stability or diminishing effects across conditional distributions.  
+    - Shaded regions (approximate confidence intervals) show where uncertainty widens, implying weaker parameter precision.  
+    """)
+
+st.markdown("---")
+
+
+
+
+
+
+        
         # ========================
         # Download Section with Scale P-values
         # ========================
