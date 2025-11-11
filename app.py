@@ -62,16 +62,16 @@ if "Country" not in df.columns or "Year" not in df.columns:
     st.stop()
 
 # ============================================
-# B2. Enhanced Distribution Overview (Compact Row Layout)
+# B2. Enhanced Distribution Overview (Compact Row + Normality Statement)
 # ============================================
 
-st.header("B2. Enhanced Distribution Overview (Compact Row Layout)")
+st.header("B2. Enhanced Distribution Overview (Compact Row + Normality Statement)")
 
 # Ensure numeric columns exist
 numeric_cols = df.select_dtypes(include='number').columns.tolist()
 
 if numeric_cols:
-    st.write("Compact visual summary of variable distributions (with internal samples).")
+    st.write("Compact visual summary of variable distributions with embedded density and normality inference.")
 
     selected_var2 = st.selectbox(
         "Select variable for distribution view:",
@@ -79,7 +79,7 @@ if numeric_cols:
         key="dist_select_row"
     )
 
-    # Data and summary
+    # Data and stats
     data = df[selected_var2].dropna()
     mean_val = data.mean()
 
@@ -88,12 +88,13 @@ if numeric_cols:
     import numpy as np
     from scipy import stats
 
-    # 1-row, 4-column figure
+    # === 1x4 Figure Layout ===
     fig, axs = plt.subplots(1, 4, figsize=(16, 4))
     cmap = sns.color_palette("viridis", as_cmap=True)
 
-    # --- Bar Plot + Density ---
-    sns.histplot(data, bins=25, kde=True, color=cmap(0.4), ax=axs[0], edgecolor='white')
+    # --- 1. Bar Plot + Density ---
+    sns.histplot(data, bins=25, kde=True, color=cmap(0.4),
+                 ax=axs[0], edgecolor='white')
     x_vals = np.linspace(data.min(), data.max(), 200)
     kde = stats.gaussian_kde(data)
     axs[0].plot(x_vals,
@@ -102,7 +103,7 @@ if numeric_cols:
     axs[0].set_title("Bar + Density", fontsize=11, fontweight="bold")
     axs[0].grid(alpha=0.3)
 
-    # --- Box Plot + Embedded Samples ---
+    # --- 2. Box Plot + Embedded Samples ---
     sns.boxplot(y=data, color=cmap(0.5), ax=axs[1])
     sample_points = np.random.choice(data, size=min(40, len(data)), replace=False)
     jitter_y = sample_points + np.random.normal(0, data.std()/50, len(sample_points))
@@ -111,14 +112,14 @@ if numeric_cols:
     axs[1].set_title("Box + Samples", fontsize=11, fontweight="bold")
     axs[1].grid(alpha=0.3)
 
-    # --- Violin Plot + Density Line ---
+    # --- 3. Violin Plot + Density Line ---
     sns.violinplot(y=data, inner=None, color=cmap(0.6), ax=axs[2])
     kde_y = np.linspace(data.min(), data.max(), 300)
     axs[2].plot(np.full_like(kde_y, 1.02), kde_y, color='black', lw=1.8)
     axs[2].set_title("Violin + Density", fontsize=11, fontweight="bold")
     axs[2].grid(alpha=0.3)
 
-    # --- Strip Plot + Mean Reference ---
+    # --- 4. Strip Plot + Mean Reference ---
     sns.stripplot(y=data, color=cmap(0.7), alpha=0.6, size=3.5,
                   jitter=0.25, ax=axs[3])
     axs[3].axhline(mean_val, color='red', linestyle='--', lw=1.5,
@@ -127,17 +128,22 @@ if numeric_cols:
     axs[3].set_title("Strip + Mean", fontsize=11, fontweight="bold")
     axs[3].grid(alpha=0.3)
 
-    # Final polish
     for ax in axs:
         ax.set_xlabel("")
         ax.set_ylabel("")
+
     plt.tight_layout()
     st.pyplot(fig)
 
+    # === Normality Test ===
+    stat, pval = stats.shapiro(data)
+    if pval > 0.05:
+        st.success(f"✅ The series **{selected_var2}** appears approximately normally distributed (Shapiro–Wilk p = {pval:.4f}).")
+    else:
+        st.warning(f"⚠️ The series **{selected_var2}** deviates from normality (Shapiro–Wilk p = {pval:.4f}).")
+
 else:
     st.warning("No numeric variables available for distribution visualization.")
-
-
 
 # ============================================
 # Section C: Correlation Analysis
