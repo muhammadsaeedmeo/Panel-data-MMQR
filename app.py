@@ -68,6 +68,89 @@ if 'Country' not in df.columns or 'Year' not in df.columns:
     st.error("❌ Required columns 'Country' and/or 'Year' not found in dataset!")
     st.stop()
 
+
+
+# ============================================
+# Section B: Variable Distribution Visualization
+# ============================================
+
+st.header("B. Variable Distribution Visualization")
+
+# Detect numeric columns
+numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+
+if not numeric_cols:
+    st.warning("No numeric variables found in your dataset for visualization.")
+else:
+    # Variable selection
+    selected_var = st.selectbox("Select Variable for Distribution Analysis", options=numeric_cols)
+
+    # Color selection
+    color_option = st.selectbox(
+        "Select Visualization Color Palette",
+        options=["coolwarm", "viridis", "plasma", "magma", "cividis", "Blues", "Greens", "Reds"],
+        index=0
+    )
+
+    # Prepare figure layout
+    fig = plt.figure(constrained_layout=True, figsize=(12, 10))
+    subfigs = fig.subfigures(2, 1, height_ratios=[2, 3])
+
+    # Upper main distribution (Histogram + KDE)
+    ax_main = subfigs[0].subplots()
+    sns.histplot(df[selected_var], kde=True, color=sns.color_palette(color_option, as_cmap=True)(0.5), ax=ax_main)
+    ax_main.set_title(f"Distribution Overview of {selected_var}", fontsize=14, fontweight='bold')
+    ax_main.set_xlabel(selected_var)
+    ax_main.set_ylabel("Frequency")
+
+    # Lower four subplots (Box, Violin, Density, QQ)
+    axs = subfigs[1].subplots(1, 4, figsize=(14, 4))
+
+    # Boxplot
+    sns.boxplot(y=df[selected_var], color=sns.color_palette(color_option, as_cmap=True)(0.4), ax=axs[0])
+    axs[0].set_title("Boxplot")
+
+    # Violin plot
+    sns.violinplot(y=df[selected_var], color=sns.color_palette(color_option, as_cmap=True)(0.6), ax=axs[1])
+    axs[1].set_title("Violin Plot")
+
+    # Density plot
+    sns.kdeplot(df[selected_var], fill=True, color=sns.color_palette(color_option, as_cmap=True)(0.5), ax=axs[2])
+    axs[2].set_title("Density Plot")
+
+    # QQ plot
+    sm.qqplot(df[selected_var], line='45', ax=axs[3], color=sns.color_palette(color_option, as_cmap=True)(0.5))
+    axs[3].set_title("Q-Q Plot")
+
+    plt.tight_layout()
+    st.pyplot(fig)
+
+    # ============================================
+    # Normality / Stationarity Interpretation
+    # ============================================
+
+    st.subheader("Distribution Interpretation")
+
+    # Normality test (Shapiro-Wilk)
+    shapiro_stat, shapiro_p = stats.shapiro(df[selected_var].dropna())
+
+    if shapiro_p > 0.05:
+        st.success(f"✅ {selected_var} appears approximately normally distributed (p = {shapiro_p:.3f}).")
+        st.write(
+            f"This suggests the variable may be **stationary or stable** around its mean, "
+            f"and deviations are consistent with a normal process."
+        )
+    else:
+        st.warning(f"⚠️ {selected_var} deviates from normality (p = {shapiro_p:.3f}).")
+        st.write(
+            f"This indicates **non-normal distribution** or possible **non-stationarity**; "
+            f"consider transformation or differencing before panel estimation."
+        )
+
+    # Show descriptive statistics
+    st.subheader("Descriptive Statistics")
+    desc = df[selected_var].describe().to_frame().T
+    st.dataframe(desc)
 # ============================================
 # Section B: Correlation Analysis
 # ============================================
