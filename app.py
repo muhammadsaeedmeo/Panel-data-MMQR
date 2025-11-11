@@ -10,11 +10,11 @@ import matplotlib.pyplot as plt
 from statsmodels.tsa.stattools import grangercausalitytests
 from statsmodels.formula.api import quantreg
 import statsmodels.api as sm
+from scipy.stats import shapiro
 from scipy import stats
-from scipy.stats import norm
 from io import BytesIO
 import warnings
-warnings.filterwarnings('ignore')
+warnings.filterwarnings("ignore")
 
 # ============================================
 # App Configuration
@@ -35,228 +35,149 @@ if uploaded_file is not None:
     df = pd.read_csv(uploaded_file)
     st.success("✅ Custom data loaded successfully!")
 else:
-    st.info("No file uploaded. Using sample dataset (sample_data.csv).")
-    # Create sample data for demonstration
+    st.info("No file uploaded. Using sample dataset.")
     np.random.seed(42)
-    countries = ['Country_' + str(i) for i in range(1, 11)]
+    countries = [f"Country_{i}" for i in range(1, 11)]
     years = list(range(2000, 2020))
-    
-    sample_data = []
-    for country in countries:
-        for year in years:
+    sample = []
+    for c in countries:
+        for y in years:
             gdp = np.random.normal(100, 20)
             tourism = gdp * 0.3 + np.random.normal(0, 5)
-            sample_data.append({
-                'Country': country,
-                'Year': year,
-                'GDP': gdp,
-                'Tourism': tourism,
-                'Investment': np.random.normal(50, 10),
-                'Trade': np.random.normal(60, 15)
+            sample.append({
+                "Country": c,
+                "Year": y,
+                "GDP": gdp,
+                "Tourism": tourism,
+                "Investment": np.random.normal(50, 10),
+                "Trade": np.random.normal(60, 15)
             })
-    
-    df = pd.DataFrame(sample_data)
-    st.session_state["uploaded_data"] = df
+    df = pd.DataFrame(sample)
 
-# Display data overview
 st.header("A. Data Overview")
 st.dataframe(df.head())
 st.write(f"Dataset shape: {df.shape}")
 
-# Check for required columns
-if 'Country' not in df.columns or 'Year' not in df.columns:
-    st.error("❌ Required columns 'Country' and/or 'Year' not found in dataset!")
+if "Country" not in df.columns or "Year" not in df.columns:
+    st.error("❌ Required columns 'Country' and/or 'Year' missing.")
     st.stop()
 
+# ============================================
+# Section B: Visualization & Normality Testing
+# ============================================
 
+st.header("B. Variable Visualization & Normality Testing")
 
-import streamlit as st
-import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
-import statsmodels.api as sm
-from scipy.stats import shapiro
+numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+if numeric_cols:
+    selected_var = st.selectbox("Select variable for analysis", options=numeric_cols)
+    color_option = st.selectbox(
+        "Color Palette", 
+        options=["viridis","coolwarm","magma","plasma","cividis","Blues","Greens","Reds"], 
+        index=0
+    )
 
-st.set_option('deprecation.showPyplotGlobalUse', False)
-
-# ============================================================
-# SECTION: Upload Data
-# ============================================================
-st.title("Panel Data Visualization & Normality Testing")
-
-uploaded_file = st.file_uploader("Upload your panel dataset (CSV)", type=["csv"])
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-    st.success("Data loaded successfully.")
-
-    # Variable selection
-    selected_var = st.selectbox("Select variable for visualization:", df.columns)
-    color_option = st.selectbox("Choose color palette:", ["viridis", "plasma", "magma", "cividis"])
-
-    # ============================================================
-    # SECTION: Visualizations
-    # ============================================================
     fig = plt.figure(constrained_layout=True, figsize=(12, 10))
     gs = fig.add_gridspec(2, 4, height_ratios=[2, 3])
 
-    # Top main plot (spans all 4 columns)
+    # main distribution
     ax_main = fig.add_subplot(gs[0, :])
     sns.histplot(df[selected_var], kde=True,
                  color=sns.color_palette(color_option, as_cmap=True)(0.5),
                  ax=ax_main)
-    ax_main.set_title(f"Distribution Overview of {selected_var}", fontsize=14, fontweight='bold')
+    ax_main.set_title(f"Distribution of {selected_var}", fontsize=14, fontweight="bold")
     ax_main.set_xlabel(selected_var)
     ax_main.set_ylabel("Frequency")
 
-    # Lower subplots
+    # four small plots
     ax_box = fig.add_subplot(gs[1, 0])
-    ax_violin = fig.add_subplot(gs[1, 1])
-    ax_density = fig.add_subplot(gs[1, 2])
-    ax_qq = fig.add_subplot(gs[1, 3])
-
-    # Boxplot
     sns.boxplot(y=df[selected_var],
                 color=sns.color_palette(color_option, as_cmap=True)(0.4),
                 ax=ax_box)
     ax_box.set_title("Boxplot")
 
-    # Violin plot
+    ax_violin = fig.add_subplot(gs[1, 1])
     sns.violinplot(y=df[selected_var],
                    color=sns.color_palette(color_option, as_cmap=True)(0.6),
                    ax=ax_violin)
     ax_violin.set_title("Violin Plot")
 
-    # Density plot
-    sns.kdeplot(df[selected_var],
-                fill=True,
+    ax_density = fig.add_subplot(gs[1, 2])
+    sns.kdeplot(df[selected_var], fill=True,
                 color=sns.color_palette(color_option, as_cmap=True)(0.5),
                 ax=ax_density)
     ax_density.set_title("Density Plot")
 
-    # Q-Q plot
-    sm.qqplot(df[selected_var].dropna(), line='45', ax=ax_qq,
+    ax_qq = fig.add_subplot(gs[1, 3])
+    sm.qqplot(df[selected_var], line="45", ax=ax_qq,
               color=sns.color_palette(color_option, as_cmap=True)(0.5))
     ax_qq.set_title("Q-Q Plot")
 
     plt.tight_layout()
     st.pyplot(fig)
 
-    # ============================================================
-    # SECTION: Normality Testing
-    # ============================================================
-    st.subheader("Normality Test (Shapiro–Wilk)")
-
-    try:
-        stat, p_value = shapiro(df[selected_var].dropna())
-        st.write(f"**Test Statistic:** {stat:.4f}")
-        st.write(f"**p-value:** {p_value:.4f}")
-
-        if p_value > 0.05:
-            st.info("Fail to reject the null hypothesis — data appears normally distributed.")
-        else:
-            st.warning("Reject the null hypothesis — data does not appear normally distributed.")
-    except Exception as e:
-        st.error(f"Normality test could not be computed: {e}")
-
-    # ============================================================
-    # SECTION: Summary Statistics
-    # ============================================================
-    st.subheader("Descriptive Statistics")
-    st.write(df[selected_var].describe())
+    # Normality test
+    stat, p = shapiro(df[selected_var])
+    st.write(f"**Shapiro–Wilk Test**: W = {stat:.3f}, p = {p:.3f}")
+    st.info("Variable is likely normal (p > 0.05)" if p > 0.05 else "Variable departs from normality (p < 0.05)")
 
 else:
-    st.warning("Please upload a CSV file to proceed.")
+    st.warning("No numeric columns found.")
 
 # ============================================
-# Section B: Correlation Analysis
+# Section C: Correlation Analysis
 # ============================================
 
-st.header("B. Correlation Analysis")
+st.header("C. Correlation Analysis")
 
-# Detect numeric columns
 numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-
-if not numeric_cols:
-    st.warning("No numeric variables found in your dataset.")
-else:
-    # Variable selection
+if numeric_cols:
     col1, col2 = st.columns(2)
     with col1:
         dep_var = st.selectbox("Select Dependent Variable", options=numeric_cols)
     with col2:
         indep_vars = st.multiselect(
             "Select Independent Variable(s)",
-            options=[col for col in numeric_cols if col != dep_var],
-            default=[col for col in numeric_cols if col != dep_var][:3] if len(numeric_cols) > 1 else []
+            options=[c for c in numeric_cols if c != dep_var],
+            default=[c for c in numeric_cols if c != dep_var][:3]
         )
 
-    # Color palette selector
     color_option = st.selectbox(
-        "Select Heatmap Color Palette",
-        options=["coolwarm", "viridis", "plasma", "magma", "cividis", "Blues", "Greens", "Reds"],
+        "Heatmap Color Palette",
+        options=["coolwarm","viridis","plasma","magma","cividis","Blues","Greens","Reds"],
         index=0
     )
 
     if indep_vars:
-        # Compute correlation matrix
         selected_vars = [dep_var] + indep_vars
         corr = df[selected_vars].corr()
-
-        # Generate heatmap
         fig, ax = plt.subplots(figsize=(10, 8))
         sns.heatmap(corr, annot=True, cmap=color_option, center=0, linewidths=0.5, fmt=".2f", ax=ax)
-        plt.title(f"Correlation Heatmap")
+        plt.title("Correlation Heatmap")
         st.pyplot(fig)
 
-        # Download button for heatmap
-        buf = BytesIO()
-        fig.savefig(buf, format="png", bbox_inches="tight")
-        st.download_button(
-            label="Download Heatmap Image",
-            data=buf.getvalue(),
-            file_name="correlation_heatmap.png",
-            mime="image/png"
-        )
+        def interpret_corr(v):
+            v = abs(v)
+            if v < 0.20: return "very weak"
+            if v < 0.40: return "weak"
+            if v < 0.60: return "moderate"
+            if v < 0.80: return "strong"
+            return "very strong"
 
-        # Correlation interpretation
         st.subheader("Correlation Interpretation")
-        
-        def interpret_corr(value):
-            val = abs(value)
-            if val < 0.20:
-                return "very weak"
-            elif val < 0.40:
-                return "weak"
-            elif val < 0.60:
-                return "moderate"
-            elif val < 0.80:
-                return "strong"
-            else:
-                return "very strong"
-
-        interpretation_text = ""
         for var in indep_vars:
-            corr_value = corr.loc[dep_var, var]
-            strength = interpret_corr(corr_value)
-            direction = "positive" if corr_value > 0 else "negative"
-            interpretation_text += (
-                f"- The correlation between **{dep_var}** and **{var}** is "
-                f"**{corr_value:.2f}**, indicating a **{strength} {direction} relationship**.\n"
-            )
+            val = corr.loc[dep_var, var]
+            st.write(f"- {dep_var} and {var}: {val:.2f} ({interpret_corr(val)} {'positive' if val>0 else 'negative'})")
+else:
+    st.warning("No numeric variables for correlation.")
 
-        st.markdown(interpretation_text)
+# ============================================
+# Section D: MMQR Implementation (unchanged)
+# ============================================
 
-        # Display correlation table
-        st.subheader("Table 1: Correlation Matrix")
-        st.dataframe(corr)
+st.markdown("---")
+st.markdown("**Panel Data Analysis Dashboard** | Built with Streamlit")
 
-        st.info(
-            "According to Evans (1996), correlation strengths are defined as: "
-            "very weak (0.00–0.19), weak (0.20–0.39), moderate (0.40–0.59), "
-            "strong (0.60–0.79), and very strong (0.80–1.00)."
-        )
-    else:
-        st.warning("Please select at least one independent variable to display correlation.")
 # ============================================
 # Section D: Corrected MMQR Implementation with Scale P-values
 # ============================================
