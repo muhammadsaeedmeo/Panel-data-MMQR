@@ -70,7 +70,7 @@ st.header("B. Variable Visualization & Normality Testing")
 numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 if numeric_cols:
     selected_var = st.selectbox("Select variable for analysis", options=numeric_cols)
-    group_col = st.selectbox("Select grouping variable (optional):", options=[None] + df.columns.tolist())
+    group_col = st.selectbox("Select grouping variable (optional):", options=["None"] + df.columns.tolist())
     color_option = st.selectbox(
         "Color Palette", 
         options=["viridis","coolwarm","magma","plasma","cividis","Blues","Greens","Reds"], 
@@ -90,19 +90,28 @@ if numeric_cols:
     axs[0, 0].set_xlabel(selected_var)
     axs[0, 0].set_ylabel("Frequency")
 
+    # Helper to handle grouping correctly
+    g = None if group_col == "None" else group_col
+
     # Box Plot
-    sns.boxplot(y=df[selected_var], x=group_col if group_col else None, 
-                color=cmap(0.4), ax=axs[0, 1])
+    if g:
+        sns.boxplot(y=df[selected_var], x=df[g], color=cmap(0.4), ax=axs[0, 1])
+    else:
+        sns.boxplot(y=df[selected_var], color=cmap(0.4), ax=axs[0, 1])
     axs[0, 1].set_title("Box Plot", fontsize=12, fontweight="bold")
 
     # Violin Plot
-    sns.violinplot(y=df[selected_var], x=group_col if group_col else None, 
-                   color=cmap(0.6), ax=axs[1, 0])
+    if g:
+        sns.violinplot(y=df[selected_var], x=df[g], color=cmap(0.6), ax=axs[1, 0])
+    else:
+        sns.violinplot(y=df[selected_var], color=cmap(0.6), ax=axs[1, 0])
     axs[1, 0].set_title("Violin Plot", fontsize=12, fontweight="bold")
 
     # Strip Plot
-    sns.stripplot(y=df[selected_var], x=group_col if group_col else None, 
-                  color=cmap(0.7), size=4, jitter=True, ax=axs[1, 1])
+    if g:
+        sns.stripplot(y=df[selected_var], x=df[g], color=cmap(0.7), size=4, jitter=True, ax=axs[1, 1])
+    else:
+        sns.stripplot(y=df[selected_var], color=cmap(0.7), size=4, jitter=True, ax=axs[1, 1])
     axs[1, 1].set_title("Strip Plot", fontsize=12, fontweight="bold")
 
     plt.tight_layout()
@@ -129,7 +138,6 @@ if numeric_cols:
 
 else:
     st.warning("No numeric columns found in dataset.")
-
 
 # ============================================
 # Section C: Correlation Analysis
