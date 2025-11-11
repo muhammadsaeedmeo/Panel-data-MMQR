@@ -62,53 +62,84 @@ if "Country" not in df.columns or "Year" not in df.columns:
     st.stop()
 
 # ============================================
-# Enhanced Distribution Overview (inserted after Section B)
+# B2. Enhanced Distribution Overview (Sample-Inside Visuals)
 # ============================================
 
 st.header("B2. Enhanced Distribution Overview (Sample-Inside Visuals)")
 
-if numeric_cols:
-    st.write("This section visualizes variable distributions with embedded density samples for shape inspection.")
-    selected_var2 = st.selectbox("Select variable for distribution view:", options=numeric_cols, key="dist_select")
+# Define numeric columns to avoid NameError
+numeric_cols = df.select_dtypes(include='number').columns.tolist()
 
+if numeric_cols:
+    st.write("Visualize each variable’s distribution with embedded density and sample patterns.")
+
+    selected_var2 = st.selectbox(
+        "Select variable for distribution view:",
+        options=numeric_cols,
+        key="dist_select"
+    )
+
+    # Extract clean numeric data
+    data = df[selected_var2].dropna()
+
+    # Basic stats
+    mean_val = data.mean()
+    std_val = data.std()
+
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import numpy as np
+    from scipy import stats
+
+    # Figure layout
     fig, axs = plt.subplots(2, 2, figsize=(14, 10))
     fig.subplots_adjust(hspace=0.35, wspace=0.35)
     cmap = sns.color_palette("viridis", as_cmap=True)
 
-    # 1. Bar Plot + Density trace inside bars
-    sns.histplot(df[selected_var2], bins=25, kde=True, color=cmap(0.5), ax=axs[0, 0], edgecolor='white')
-    x_vals = np.linspace(df[selected_var2].min(), df[selected_var2].max(), 200)
-    kde = stats.gaussian_kde(df[selected_var2])
-    axs[0, 0].plot(x_vals, kde(x_vals) * len(df[selected_var2]) * (x_vals[1] - x_vals[0]) * 25, color='black', lw=2)
+    # 1. Bar Plot + Density trace
+    sns.histplot(data, bins=25, kde=True, color=cmap(0.5),
+                 ax=axs[0, 0], edgecolor='white')
+    x_vals = np.linspace(data.min(), data.max(), 200)
+    kde = stats.gaussian_kde(data)
+    axs[0, 0].plot(
+        x_vals,
+        kde(x_vals) * len(data) * (x_vals[1] - x_vals[0]) * 25,
+        color='black', lw=2
+    )
     axs[0, 0].set_title("Bar Plot + Internal Density", fontsize=12, fontweight="bold")
     axs[0, 0].grid(alpha=0.3)
 
-    # 2. Box Plot + Internal Kernel Sample
-    sns.boxplot(y=df[selected_var2], color=cmap(0.4), ax=axs[0, 1])
-    sample_points = np.random.choice(df[selected_var2], size=min(50, len(df)), replace=False)
-    jitter_y = sample_points + np.random.normal(0, df[selected_var2].std()/50, len(sample_points))
-    axs[0, 1].scatter(np.random.normal(1, 0.02, len(jitter_y)), jitter_y, color='black', s=15, alpha=0.6)
+    # 2. Box Plot + Embedded Sample Trace
+    sns.boxplot(y=data, color=cmap(0.4), ax=axs[0, 1])
+    sample_points = np.random.choice(data, size=min(50, len(data)), replace=False)
+    jitter_y = sample_points + np.random.normal(0, data.std()/50, len(sample_points))
+    axs[0, 1].scatter(np.random.normal(1, 0.02, len(jitter_y)),
+                      jitter_y, color='black', s=15, alpha=0.6)
     axs[0, 1].set_title("Box Plot + Embedded Sample Trace", fontsize=12, fontweight="bold")
     axs[0, 1].grid(alpha=0.3)
 
-    # 3. Violin Plot + Embedded Sample Density Line
-    sns.violinplot(y=df[selected_var2], inner=None, color=cmap(0.6), ax=axs[1, 0])
-    kde_y = np.linspace(df[selected_var2].min(), df[selected_var2].max(), 300)
+    # 3. Violin Plot + Internal Density Line
+    sns.violinplot(y=data, inner=None, color=cmap(0.6), ax=axs[1, 0])
+    kde_y = np.linspace(data.min(), data.max(), 300)
     axs[1, 0].plot(np.full_like(kde_y, 1.02), kde_y, color='black', lw=1.8)
     axs[1, 0].set_title("Violin Plot + Internal Density Line", fontsize=12, fontweight="bold")
     axs[1, 0].grid(alpha=0.3)
 
-    # 4. Strip Plot + Mini KDE Overlay
-    sns.stripplot(y=df[selected_var2], color=cmap(0.7), alpha=0.6, size=4, jitter=0.25, ax=axs[1, 1])
-    axs[1, 1].axhline(df[selected_var2].mean(), color='red', linestyle='--', lw=2, label="Mean")
+    # 4. Strip Plot + Mean Reference
+    sns.stripplot(y=data, color=cmap(0.7), alpha=0.6,
+                  size=4, jitter=0.25, ax=axs[1, 1])
+    axs[1, 1].axhline(mean_val, color='red', linestyle='--',
+                      lw=2, label=f"Mean = {mean_val:.2f}")
     axs[1, 1].legend()
     axs[1, 1].set_title("Strip Plot + Mean Reference", fontsize=12, fontweight="bold")
     axs[1, 1].grid(alpha=0.3)
 
     plt.tight_layout()
     st.pyplot(fig)
+
 else:
     st.warning("No numeric variables available for distribution visualization.")
+
 
 # ============================================
 # Section C: Correlation Analysis
