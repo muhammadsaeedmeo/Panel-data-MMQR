@@ -219,15 +219,19 @@ st.dataframe(mmqr_loc.round(3))
 st.subheader("Scale Parameters (θ̂)")
 st.dataframe(mmqr_scale.round(3))
 
-# --- Step 5: Generate fitted quantile curves ---
+# --- Step 5: MMQR Coefficients, SEs, and P-values Across Quantiles ---
 quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
-coef_dyn = pd.DataFrame({
-    q: mmqr_loc + mmqr_scale * (q - 0.5) for q in quantiles
-})
-coef_dyn.index.name = "Variable"
+qr_models = {q: sm.QuantReg(df_norm[dep_var], sm.add_constant(df_norm[indep_vars])).fit(q=q)
+             for q in quantiles}
 
-st.subheader("MMQR Coefficients Across Quantiles")
-st.dataframe(coef_dyn.round(3))
+mmqr_results, mmqr_se, mmqr_p = {}, {}, {}
+
+for q in quantiles:
+    coeff_q = qr_models[q].params
+    se_q = qr_models[q].bse
+    t_vals = coeff_q / se_q
+    p_vals = 2 * (1 - stats.t.cdf(np.abs(t_vals), df=len(df_norm) - len(indep_vars) - 1))
+    mmqr_results[q], mmqr_se[q], mmqr_p[q] = coeff_q, se_q, p_vals
 
 # --- Step 6: Plot dynamics ---
 st.subheader("Coefficient Dynamics by Quantile")
