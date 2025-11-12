@@ -225,7 +225,7 @@ loc_table = pd.DataFrame({
     "Coefficient": location_params.round(3),
     "Std. Error": location_se.round(3),
     "P-Value": location_p.round(3)
-})[["Coefficient", "Std. Error", "P-Value"]]
+})
 st.dataframe(loc_table)
 
 st.subheader(f"Scale Parameters (τ = {q_low}–{q_high})")
@@ -233,7 +233,7 @@ scale_table = pd.DataFrame({
     "Coefficient": scale_params.round(3),
     "Std. Error": scale_se.round(3),
     "P-Value": scale_p.round(3)
-})[["Coefficient", "Std. Error", "P-Value"]]
+})
 st.dataframe(scale_table)
 
 # --- Step 5: MMQR Coefficients, SEs, and P-values Across Quantiles ---
@@ -251,21 +251,24 @@ for q in quantiles:
     p_vals = 2 * (1 - stats.t.cdf(np.abs(t_vals), df=df_resid))
     mmqr_p[q] = p_vals
 
-# --- Arrange columns in correct order: Coefficient → Std. Error → P-Value
-mmqr_df = pd.concat({
-    "Coefficient": pd.DataFrame(mmqr_results),
-    "Std. Error": pd.DataFrame(mmqr_se),
-    "P-Value": pd.DataFrame(mmqr_p)
-}, axis=1)[["Coefficient", "Std. Error", "P-Value"]].round(3)
+# --- Step 6: Merge all into compact stacked-cell format ---
+formatted = {}
+for q in quantiles:
+    formatted[q] = mmqr_results[q].round(3).astype(str) + " (" + \
+                   mmqr_se[q].round(3).astype(str) + ") [" + \
+                   mmqr_p[q].round(3).astype(str) + "]"
 
-st.subheader("MMQR Coefficients, Std. Errors, and P-Values Across Quantiles")
+mmqr_df = pd.DataFrame(formatted)
+
+st.subheader("MMQR Results: Coefficient (Std. Error) [P-Value] Across Quantiles")
+st.markdown("Each cell shows: Coefficient (Std. Error) [P-Value]")
 st.dataframe(mmqr_df)
 
-# --- Step 6: Plot Coefficient Dynamics ---
+# --- Step 7: Plot Coefficient Dynamics ---
 st.subheader("Coefficient Dynamics by Quantile")
 fig, ax = plt.subplots(figsize=(8, 5))
 for var in indep_vars:
-    ax.plot(quantiles, [mmqr_df.loc[var, ('Coefficient', q)] for q in quantiles],
+    ax.plot(quantiles, [mmqr_results[q][var] for q in quantiles],
             marker="o", label=var)
 ax.axhline(0, color="black", linewidth=0.8)
 ax.set_xlabel("Quantile (τ)")
@@ -274,22 +277,21 @@ ax.set_title("MMQR Coefficient Dynamics Across Quantiles")
 ax.legend()
 st.pyplot(fig)
 
-# --- Step 7: Download Combined Results ---
+# --- Step 8: Download Results ---
 out_text = []
 out_text.append("=== LOCATION PARAMETERS ===\n")
 out_text.append(loc_table.to_string())
 out_text.append("\n\n=== SCALE PARAMETERS ===\n")
 out_text.append(scale_table.to_string())
-out_text.append("\n\n=== MMQR COEFFICIENTS (with SE & P-values) ACROSS QUANTILES ===\n")
+out_text.append("\n\n=== MMQR COEFFICIENTS (Coef, Std.Err, P-Value) ACROSS QUANTILES ===\n")
 out_text.append(mmqr_df.to_string())
 
 st.download_button(
-    "📥 Download MMQR Location–Scale Results (RTF)",
+    "📥 Download MMQR Compact Results (RTF)",
     data="\n".join(out_text),
-    file_name="MMQR_Location_Scale_Results.rtf",
+    file_name="MMQR_Compact_Results.rtf",
     mime="application/rtf"
 )
-
 
 
 # ============================================
