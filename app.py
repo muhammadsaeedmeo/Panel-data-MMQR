@@ -225,7 +225,7 @@ loc_table = pd.DataFrame({
     "Coefficient": location_params.round(3),
     "Std. Error": location_se.round(3),
     "P-Value": location_p.round(3)
-})
+})[["Coefficient", "Std. Error", "P-Value"]]
 st.dataframe(loc_table)
 
 st.subheader(f"Scale Parameters (τ = {q_low}–{q_high})")
@@ -233,7 +233,7 @@ scale_table = pd.DataFrame({
     "Coefficient": scale_params.round(3),
     "Std. Error": scale_se.round(3),
     "P-Value": scale_p.round(3)
-})
+})[["Coefficient", "Std. Error", "P-Value"]]
 st.dataframe(scale_table)
 
 # --- Step 5: MMQR Coefficients, SEs, and P-values Across Quantiles ---
@@ -251,11 +251,12 @@ for q in quantiles:
     p_vals = 2 * (1 - stats.t.cdf(np.abs(t_vals), df=df_resid))
     mmqr_p[q] = p_vals
 
+# --- Arrange columns in correct order: Coefficient → Std. Error → P-Value
 mmqr_df = pd.concat({
     "Coefficient": pd.DataFrame(mmqr_results),
     "Std. Error": pd.DataFrame(mmqr_se),
     "P-Value": pd.DataFrame(mmqr_p)
-}, axis=1).round(3)
+}, axis=1)[["Coefficient", "Std. Error", "P-Value"]].round(3)
 
 st.subheader("MMQR Coefficients, Std. Errors, and P-Values Across Quantiles")
 st.dataframe(mmqr_df)
@@ -288,6 +289,7 @@ st.download_button(
     file_name="MMQR_Location_Scale_Results.rtf",
     mime="application/rtf"
 )
+
 
 
 # ============================================
