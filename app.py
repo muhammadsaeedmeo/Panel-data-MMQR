@@ -186,72 +186,128 @@ if numeric_cols:
 else:
     st.warning("No numeric variables for correlation.")
 
-# ===============================================================
-# 🟩 SECTION 4: MM-Quantile Regression Estimation (with SE & Stars)
-# ===============================================================
-st.header("Table 4: MM-Quantile Regression Estimation Results")
+# === Robust, self-contained Table 4 block: MMQR results with SEs & stars ===
+import numpy as np
+import pandas as pd
+import statsmodels.formula.api as smf
 
-# If mmqr_results not created yet, rebuild it
-if "mmqr_results" not in locals():
-    mmqr_results = {}
-    for tau in quantiles:
-        model = smf.quantreg("IT ~ gbi + GDP + REER + TGGE + PS + AT", data=df).fit(q=tau)
-        mmqr_results[tau] = {
-            "model": model,
-            "mmqr_coefficients": model.params,
-            "pvalues": model.pvalues,
-            "coefficients": model.params
-        }
-
-# Prepare table
-mmqr_data = []
-coef_names = mmqr_results[quantiles[0]]["coefficients"].index.tolist()
-
-for var in coef_names:
-    var_label = "Intercept" if var.lower() in ["_cons", "intercept"] else var
-    row = {"Variable": var_label}
-
-    for tau in quantiles:
-        if tau not in mmqr_results:
-            row[f"τ = {tau}"] = ""
-            continue
-
-        model_obj = mmqr_results[tau]["model"]
-        coef = mmqr_results[tau]["mmqr_coefficients"].get(var, np.nan)
-        se = model_obj.bse.get(var, np.nan)
-        pval = mmqr_results[tau]["pvalues"].get(var, np.nan)
-
-        # significance stars
-        if pval < 0.01:
-            stars = "***"
-        elif pval < 0.05:
-            stars = "**"
-        elif pval < 0.10:
-            stars = "*"
+# --- Safeguards: ensure required objects exist ---
+if 'df' not in globals():
+    st.error("Dataframe 'df' not found. Make sure data is loaded earlier in the app.")
+else:
+    # default dep/indep if missing (you likely already have these defined)
+    if 'dep_var' not in globals():
+        st.error("Dependent variable 'dep_var' not found.")
+    elif 'indep_vars' not in globals() or not indep_vars:
+        st.error("Independent variables 'indep_vars' not found or empty.")
+    else:
+        # Normalize quantiles variable (accept either list or comma-separated string)
+        if 'quantiles' not in globals() or quantiles is None:
+            quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
         else:
-            stars = ""
+            # if quantiles came from a text_input, it might be a string
+            if isinstance(quantiles, str):
+                try:
+                    quantiles = [float(q.strip()) for q in quantiles.split(',') if q.strip() != ""]
+                except Exception:
+                    quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
+            # if it's already a list/tuple, ensure floats
+            else:
+                quantiles = [float(q) for q in quantiles]
 
-        row[f"τ = {tau}"] = f"{coef:.3f} ({se:.3f}){stars}"
+        # Guard against empty quantiles after parsing
+        if len(quantiles) == 0:
+            quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
 
-    mmqr_data.append(row)
+        # Build formula from dep_var and indep_vars
+        rhs = " + ".join(indep_vars)
+        formula = f"{dep_var} ~ {rhs}"
 
-mmqr_df = pd.DataFrame(mmqr_data)
+        # Rebuild mmqr_results if missing or incomplete
+        if 'mmqr_results' not in globals() or not isinstance(mmqr_results, dict) or any(q not in mmqr_results for q in quantiles):
+            mmqr_results = {}
+            progress = st.progress(0)
+            for i, q in enumerate(quantiles):
+                try:
+                    # Attempt robust vcov first; fallback to default fit
+                    try:
+                        model = smf.quantreg(formula, data=df).fit(q=q, vcov='robust')
+                    except TypeError:
+                        # older statsmodels might not accept vcov argument in fit
+                        model = smf.quantreg(formula, data=df).fit(q=q)
+                    mmqr_results[q] = {
+                        "model": model,
+                        "mmqr_coefficients": model.params,
+                        "pvalues": model.pvalues,
+                        "coefficients": model.params
+                    }
+                except Exception as e:
+                    st.warning(f"Quantile regression failed at q={q}: {e}")
+                progress.progress(int((i + 1) / len(quantiles) * 100))
+            progress.empty()
 
-st.write("Coefficients with robust standard errors in parentheses. "
-         "*** p < 0.01, ** p < 0.05, * p < 0.10.")
-st.dataframe(mmqr_df, use_container_width=True)
+        # Prepare academic-style table: coef (se)stars
+        st.subheader("Table 4: MMQR Estimation Results (coef (SE) and significance stars)")
+        mmqr_rows = []
+        # Use first available quantile to extract coefficient names
+        first_q = next((q for q in quantiles if q in mmqr_results), None)
+        if first_q is None:
+            st.error("No quantile results available to display.")
+        else:
+            coef_names = mmqr_results[first_q]["coefficients"].index.tolist()
 
-# Export
-mmqr_df.to_csv("MMQR_Results_Academic.csv", index=False)
-st.success("✅ MM-Quantile Regression results exported successfully as 'MMQR_Results_Academic.csv'.")
+            for var in coef_names:
+                display_name = "Intercept" if var.lower() in ["_cons", "intercept"] else var
+                row = {"Variable": display_name}
+                for q in quantiles:
+                    if q not in mmqr_results:
+                        row[f"τ = {q}"] = ""
+                        continue
+                    model_obj = mmqr_results[q]["model"]
+                    # coef from mmqr_coefficients (keeps any mmqr transform)
+                    coef = float(mmqr_results[q]["mmqr_coefficients"].get(var, np.nan))
+                    # robust se if available in model_obj.bse, else try model_obj.std_errors or fallback to np.nan
+                    try:
+                        se = float(model_obj.bse.get(var, np.nan))
+                    except Exception:
+                        try:
+                            se = float(model_obj.bse[var])
+                        except Exception:
+                            se = np.nan
+                    try:
+                        pval = float(mmqr_results[q]["pvalues"].get(var, np.nan))
+                    except Exception:
+                        pval = np.nan
 
-with open("MMQR_Results_Academic.csv", "rb") as f:
-    st.download_button(
-        label="⬇️ Download MMQR Results (CSV)",
-        data=f,
-        file_name="MMQR_Results_Academic.csv",
-        mime="text/csv"
-    )
+                    # significance stars
+                    if not np.isfinite(pval):
+                        stars = ""
+                    elif pval < 0.01:
+                        stars = "***"
+                    elif pval < 0.05:
+                        stars = "**"
+                    elif pval < 0.1:
+                        stars = "*"
+                    else:
+                        stars = ""
+
+                    # format safely even if se or coef are nan
+                    coef_str = f"{coef:.3f}" if np.isfinite(coef) else "NA"
+                    se_str = f"{se:.3f}" if np.isfinite(se) else "NA"
+                    row[f"τ = {q}"] = f"{coef_str} ({se_str}){stars}"
+
+                mmqr_rows.append(row)
+
+            mmqr_df = pd.DataFrame(mmqr_rows)
+            st.write("Note: coefficients with robust standard errors in parentheses. *** p<0.01, ** p<0.05, * p<0.10.")
+            st.dataframe(mmqr_df, use_container_width=True)
+
+            # Export CSV and allow download
+            csv_path = "MMQR_Results_Academic.csv"
+            mmqr_df.to_csv(csv_path, index=False)
+            st.success(f"MMQR results saved to '{csv_path}'.")
+            with open(csv_path, "rb") as f:
+                st.download_button("⬇️ Download MMQR Results (CSV)", data=f, file_name=csv_path, mime="text/csv")
 
 # ============================================
 # Footer
