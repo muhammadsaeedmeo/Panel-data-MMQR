@@ -187,123 +187,63 @@ else:
     st.warning("No numeric variables for correlation.")
 
 # ============================================
-# Section D: MMQR Implementation with Location, Scale, and SEs
+# SECTION 4: MM-Quantile Regression (Normalized)
 # ============================================
 
-st.markdown("---")
-st.header("D. Method of Moments Quantile Regression (MMQR) — Machado & Santos Silva (2019)")
+st.header("Section 4: Method of Moments Quantile Regression (MMQR)")
 
-if 'dep_var' not in locals() or 'indep_vars' not in locals() or not indep_vars:
-    st.warning("Please complete the correlation analysis first to select dependent and independent variables.")
-else:
-    st.subheader("MMQR Configuration")
+# --- Normalize variables (Z-score) ---
+numeric_cols = [dep_var] + indep_vars
+df_norm = df.copy()
+for col in numeric_cols:
+    df_norm[col] = (df_norm[col] - df_norm[col].mean()) / df_norm[col].std()
 
-    col1, col2 = st.columns(2)
-    with col1:
-        quantiles = st.text_input("Quantiles (comma-separated)", "0.05,0.25,0.50,0.75,0.95")
-        quantiles = [float(q.strip()) for q in quantiles.split(",")]
-    with col2:
-        reference_quantile = st.selectbox("Reference Quantile for Location", [0.25, 0.50, 0.75], index=1)
+st.markdown("All variables have been standardized (mean = 0, standard deviation = 1).")
 
-    # MMQR Function
-    def run_mmqr(data, dep_var, indep_vars, quantiles, reference_quantile=0.5):
-        results = {}
-        X = data[indep_vars]
-        y = data[dep_var]
-        formula = f"{dep_var} ~ {' + '.join(indep_vars)}"
+# --- MMQR estimation across quantiles ---
+quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
+formula = f"{dep_var} ~ {' + '.join(indep_vars)}"
 
-        # Step 1: Location (reference quantile)
-        loc_model = quantreg(formula, data).fit(q=reference_quantile, vcov='robust')
-        location_params = loc_model.params
-        location_se = loc_model.bse
-        location_p = loc_model.pvalues
+mmqr_results = {}
+progress = st.progress(0)
+for i, tau in enumerate(quantiles):
+    model = smf.quantreg(formula, df_norm).fit(q=tau)
+    mmqr_results[tau] = model
+    progress.progress((i + 1) / len(quantiles))
 
-        # Step 2: Scale parameters (difference between τ=0.75 and τ=0.25)
-        q_high, q_low = 0.75, 0.25
-        model_high = quantreg(formula, data).fit(q=q_high, vcov='robust')
-        model_low = quantreg(formula, data).fit(q=q_low, vcov='robust')
+st.success("MM-Quantile Regression estimation completed successfully.")
 
-        scale_params = (model_high.params - model_low.params) / (q_high - q_low)
-        scale_se = np.sqrt((model_high.bse**2 + model_low.bse**2) / ((q_high - q_low)**2))
-        t_stats = scale_params / scale_se
-        dfree = len(data) - len(indep_vars) - 1
-        scale_p = 2 * (1 - stats.t.cdf(np.abs(t_stats), df=dfree))
+# --- Coefficient summary table ---
+results_df = pd.DataFrame({f"τ={tau:.2f}": model.params for tau, model in mmqr_results.items()})
+results_df = results_df.round(4)
+st.write("### Coefficient Estimates (Standardized)")
+st.dataframe(results_df)
 
-        # Step 3: MMQR across quantiles
-        for tau in quantiles:
-            model = quantreg(formula, data).fit(q=tau, vcov='robust')
-            results[tau] = {
-                "coefficients": model.params,
-                "stderr": model.bse,
-                "pvalues": model.pvalues
-            }
+# --- Plot coefficient variation ---
+st.write("### Coefficient Trajectories Across Quantiles")
+fig, ax = plt.subplots(figsize=(8, 5))
+for var in indep_vars:
+    ax.plot(quantiles, [mmqr_results[q].params[var] for q in quantiles],
+            marker="o", label=var)
+ax.set_xlabel("Quantile (τ)")
+ax.set_ylabel("Coefficient (Standardized)")
+ax.set_title("Coefficient Variation Across Quantiles")
+ax.legend()
+st.pyplot(fig)
 
-        return location_params, location_se, location_p, scale_params, scale_se, scale_p, results
+# --- Export results ---
+buffer = []
+for tau, model in mmqr_results.items():
+    buffer.append(f"\n=== Quantile τ = {tau} ===\n")
+    buffer.append(model.summary().as_text())
+output_text = "\n".join(buffer)
 
-    try:
-        loc_b, loc_se, loc_p, sc_b, sc_se, sc_p, mmqr_results = run_mmqr(df, dep_var, indep_vars, quantiles, reference_quantile)
-
-        # Table 1: Location Parameters
-        st.subheader(f"Table 1. Location Parameters (τ = {reference_quantile})")
-        loc_table = pd.DataFrame({
-            "Variable": loc_b.index,
-            "Coefficient": loc_b.values,
-            "Std. Error": loc_se.values,
-            "P-Value": loc_p.values,
-            "Significance": ["***" if p < 0.01 else "**" if p < 0.05 else "*" if p < 0.1 else "" for p in loc_p.values]
-        })
-        st.dataframe(loc_table, use_container_width=True)
-
-        # Table 2: Scale Parameters
-        st.subheader("Table 2. Scale Parameters (τ = 0.75 − τ = 0.25)")
-        scale_table = pd.DataFrame({
-            "Variable": sc_b.index,
-            "Scale Coefficient": sc_b.values,
-            "Std. Error": sc_se.values,
-            "P-Value": sc_p,
-            "Significance": ["***" if p < 0.01 else "**" if p < 0.05 else "*" if p < 0.1 else "" for p in sc_p]
-        })
-        st.dataframe(scale_table, use_container_width=True)
-
-        # Table 3: MMQR Results for Each Quantile
-        st.subheader("Table 3. MMQR Estimation Results")
-        combined_rows = []
-        for var in loc_b.index:
-            row = {"Variable": var}
-            for tau in quantiles:
-                coef = mmqr_results[tau]["coefficients"][var]
-                pval = mmqr_results[tau]["pvalues"][var]
-                se = mmqr_results[tau]["stderr"][var]
-                stars = "***" if pval < 0.01 else "**" if pval < 0.05 else "*" if pval < 0.1 else ""
-                row[f"τ={tau}"] = f"{coef:.3f}{stars}\n({se:.3f})"
-            combined_rows.append(row)
-        mmqr_table = pd.DataFrame(combined_rows)
-        st.dataframe(mmqr_table, use_container_width=True)
-
-        # Plot Coefficient Dynamics
-        st.subheader("Figure 1. MMQR Coefficient Dynamics")
-        for var in indep_vars:
-            fig, ax = plt.subplots(figsize=(8, 5))
-            coefs = [mmqr_results[t]["coefficients"][var] for t in quantiles]
-            ax.plot(quantiles, coefs, 'o-', color='blue', label=var)
-            ax.axhline(y=loc_b[var], color='red', linestyle='--', label='Location (ref quantile)')
-            ax.set_xlabel("Quantile (τ)")
-            ax.set_ylabel("Coefficient")
-            ax.set_title(f"MMQR Coefficient Dynamics: {var}")
-            ax.legend()
-            st.pyplot(fig)
-
-        # Download results
-        download_df = pd.concat([
-            loc_table.assign(Type="Location"),
-            scale_table.assign(Type="Scale"),
-            mmqr_table.melt(id_vars=["Variable"], var_name="Quantile", value_name="Coef(SE)").assign(Type="MMQR")
-        ])
-        csv_data = download_df.to_csv(index=False)
-        st.download_button("📥 Download MMQR Results (CSV)", data=csv_data, file_name="MMQR_Results.csv", mime="text/csv")
-
-    except Exception as e:
-        st.error(f"MMQR estimation failed: {str(e)}")
+st.download_button(
+    label="Download MMQR Results (RTF)",
+    data=output_text,
+    file_name="MMQR_results_normalized.rtf",
+    mime="application/rtf"
+)
 
 
 # ============================================
