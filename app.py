@@ -187,29 +187,34 @@ else:
     st.warning("No numeric variables for correlation.")
 
 # ============================================================
-# SECTION 4: MULTIMODAL QUANTILE REGRESSION (MMQR)
+# 🔹 SECTION 4: MULTIMODAL QUANTILE REGRESSION (MMQR)
 # ============================================================
 
-st.subheader("📊 Section 4: Multimodal Quantile Regression (MMQR) with Significance Tests")
+st.subheader("📊 Section 4: Multimodal Quantile Regression (MMQR)")
 
-# Step 1. Check selections
+# --- Variable Selection Area ---
+y_var = st.selectbox("Select Dependent Variable (DV):", df.columns)
+x_vars = st.multiselect("Select Independent Variables (IVs):", df.columns)
+
+# --- Run MMQR only when variables selected ---
 if not y_var or not x_vars:
-    st.warning("Please select dependent and independent variables above.")
+    st.warning("Please select both dependent and independent variables above.")
 else:
     try:
-        # Step 2. Normalize selected variables
+        # 1. Normalize selected variables
         df_norm = df.copy()
         selected_vars = [y_var] + x_vars
         for col in selected_vars:
-            df_norm[col] = (df[col] - df[col].mean()) / df[col].std()
+            if df_norm[col].dtype in ['float64', 'int64']:
+                df_norm[col] = (df_norm[col] - df_norm[col].mean()) / df_norm[col].std()
 
-        # Step 3. Build formula dynamically
+        # 2. Build model formula dynamically
         formula = f"{y_var} ~ {' + '.join(x_vars)}"
 
-        # Step 4. Define quantiles
+        # 3. Quantiles to estimate
         quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
 
-        # Step 5. Run quantile regressions
+        # 4. Run MMQR
         results_summary = []
         for tau in quantiles:
             model = quantreg(formula, df_norm).fit(q=tau)
@@ -217,7 +222,7 @@ else:
             frame["Quantile"] = tau
             results_summary.append(frame.reset_index())
 
-        # Step 6. Combine results
+        # 5. Combine results across quantiles
         mmqr_full = pd.concat(results_summary, axis=0)
         mmqr_full.rename(columns={
             "index": "Variable",
@@ -226,19 +231,33 @@ else:
             "P>|t|": "p_value"
         }, inplace=True)
 
-        # Step 7. Display results
-        st.markdown("### MMQR Coefficients with Standard Errors and p-values")
-        st.dataframe(mmqr_full.style.format({
-            "Coefficient": "{:.4f}",
-            "Std_Error": "{:.4f}",
-            "p_value": "{:.4f}"
-        }))
+        # 6. Add significance stars for aesthetics
+        def starify(p):
+            if p < 0.01:
+                return "***"
+            elif p < 0.05:
+                return "**"
+            elif p < 0.10:
+                return "*"
+            else:
+                return ""
+        mmqr_full["Significance"] = mmqr_full["p_value"].apply(starify)
 
-        # Step 8. Plot coefficients across quantiles
-        plt.figure(figsize=(10,6))
+        # 7. Display full results table
+        st.markdown("### MMQR Results (with Normalization, SEs, and p-values)")
+        st.dataframe(
+            mmqr_full.style.format({
+                "Coefficient": "{:.4f}",
+                "Std_Error": "{:.4f}",
+                "p_value": "{:.4f}"
+            })
+        )
+
+        # 8. Plot coefficients across quantiles
+        plt.figure(figsize=(10, 6))
         for var in x_vars:
-            if var in mmqr_full["Variable"].unique():
-                subset = mmqr_full[mmqr_full["Variable"] == var]
+            subset = mmqr_full[mmqr_full["Variable"] == var]
+            if not subset.empty:
                 plt.plot(subset["Quantile"], subset["Coefficient"], marker='o', label=var)
         plt.title(f"MMQR Coefficients Across Quantiles ({y_var} as DV)")
         plt.xlabel("Quantile (τ)")
@@ -246,16 +265,18 @@ else:
         plt.legend()
         st.pyplot(plt)
 
-        # Step 9. Export results
+        # 9. Export results to CSV for academic use
         buffer = BytesIO()
         mmqr_full.to_csv(buffer, index=False)
-        st.download_button("Download MMQR Results (CSV)",
-                           data=buffer.getvalue(),
-                           file_name="MMQR_results.csv",
-                           mime="text/csv")
+        st.download_button(
+            "📥 Download MMQR Results (CSV)",
+            data=buffer.getvalue(),
+            file_name="MMQR_results.csv",
+            mime="text/csv"
+        )
 
     except Exception as e:
-        st.error(f"Error in MMQR estimation: {e}")
+        st.error(f"Error during MMQR estimation: {e}")
 
 
 # ============================================
