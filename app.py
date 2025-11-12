@@ -187,7 +187,7 @@ else:
     st.warning("No numeric variables for correlation.")
 
 # ============================================
-# Section 4: MMQR with Location and Scale Parameters
+# Section 4: Method of Moments Quantile Regression (MMQR)
 # ============================================
 
 st.header("Section 4: Method of Moments Quantile Regression (MMQR) with Location–Scale Decomposition")
@@ -200,7 +200,7 @@ for col in numeric_cols:
 
 st.markdown("All variables have been standardized (mean = 0, SD = 1).")
 
-# --- Step 2: Reference quantile for location (usually median) ---
+# --- Step 2: Location parameters (τ = 0.5) ---
 ref_q = 0.5
 formula = f"{dep_var} ~ {' + '.join(indep_vars)}"
 location_model = quantreg(formula, df_norm).fit(q=ref_q)
@@ -208,7 +208,7 @@ location_params = location_model.params
 location_se = location_model.bse
 location_p = location_model.pvalues
 
-# --- Step 3: Scale parameters from upper–lower quantile difference ---
+# --- Step 3: Scale parameters (τ = 0.25–0.75) ---
 q_low, q_high = 0.25, 0.75
 model_low = quantreg(formula, df_norm).fit(q=q_low)
 model_high = quantreg(formula, df_norm).fit(q=q_high)
@@ -219,7 +219,7 @@ t_vals = scale_params / scale_se
 df_resid = len(df_norm) - len(indep_vars) - 1
 scale_p = 2 * (1 - stats.t.cdf(abs(t_vals), df=df_resid))
 
-# --- Step 4: Display tables ---
+# --- Step 4: Display Location and Scale Tables ---
 st.subheader(f"Location Parameters (τ = {ref_q})")
 loc_table = pd.DataFrame({
     "Coefficient": location_params.round(3),
@@ -236,37 +236,50 @@ scale_table = pd.DataFrame({
 })
 st.dataframe(scale_table)
 
-# --- Step 5: MMQR coefficients across quantiles ---
+# --- Step 5: MMQR Coefficients, SEs, and P-values Across Quantiles ---
 quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
-mmqr_results = {}
-for q in quantiles:
-    mmqr_coeff = location_params + scale_params * q
-    mmqr_results[q] = mmqr_coeff
+mmqr_results, mmqr_se, mmqr_p = {}, {}, {}
 
-st.subheader("MMQR Coefficients Across Quantiles")
-mmqr_df = pd.DataFrame(mmqr_results).round(3)
+for q in quantiles:
+    coeff_q = location_params + scale_params * q
+    mmqr_results[q] = coeff_q
+
+    se_q = np.sqrt(location_se**2 + (q**2) * scale_se**2)
+    mmqr_se[q] = se_q
+
+    t_vals = coeff_q / se_q
+    p_vals = 2 * (1 - stats.t.cdf(np.abs(t_vals), df=df_resid))
+    mmqr_p[q] = p_vals
+
+mmqr_df = pd.concat({
+    "Coefficient": pd.DataFrame(mmqr_results),
+    "Std. Error": pd.DataFrame(mmqr_se),
+    "P-Value": pd.DataFrame(mmqr_p)
+}, axis=1).round(3)
+
+st.subheader("MMQR Coefficients, Std. Errors, and P-Values Across Quantiles")
 st.dataframe(mmqr_df)
 
-# --- Step 6: Plot coefficient dynamics ---
+# --- Step 6: Plot Coefficient Dynamics ---
 st.subheader("Coefficient Dynamics by Quantile")
 fig, ax = plt.subplots(figsize=(8, 5))
 for var in indep_vars:
-    ax.plot(quantiles, [mmqr_df.loc[var, q] for q in quantiles],
+    ax.plot(quantiles, [mmqr_df.loc[var, ('Coefficient', q)] for q in quantiles],
             marker="o", label=var)
 ax.axhline(0, color="black", linewidth=0.8)
 ax.set_xlabel("Quantile (τ)")
 ax.set_ylabel("Coefficient (standardized)")
-ax.set_title("MMQR Coefficient Dynamics")
+ax.set_title("MMQR Coefficient Dynamics Across Quantiles")
 ax.legend()
 st.pyplot(fig)
 
-# --- Step 7: Download combined results ---
+# --- Step 7: Download Combined Results ---
 out_text = []
 out_text.append("=== LOCATION PARAMETERS ===\n")
 out_text.append(loc_table.to_string())
 out_text.append("\n\n=== SCALE PARAMETERS ===\n")
 out_text.append(scale_table.to_string())
-out_text.append("\n\n=== MMQR COEFFICIENTS ACROSS QUANTILES ===\n")
+out_text.append("\n\n=== MMQR COEFFICIENTS (with SE & P-values) ACROSS QUANTILES ===\n")
 out_text.append(mmqr_df.to_string())
 
 st.download_button(
