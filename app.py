@@ -196,7 +196,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import norm, t as t_dist
-from statsmodels.regression.quantile_regression import QuantReg as quantreg
+from statsmodels.regression.quantile_regression import QuantReg
+import statsmodels.api as sm
 
 st.header("Method of Moments Quantile Regression (MMQR) - Machado & Santos Silva (2019)")
 
@@ -274,8 +275,11 @@ else:
         if (corr_matrix.abs() > 0.99).sum().sum() > len(x_vars):
             st.warning("⚠️ High collinearity detected between predictors. Results may be unstable.")
         
-        # Prepare formula and data
-        formula = f"{y_var} ~ {' + '.join(x_vars)}"
+        # Prepare data for statsmodels
+        y = data_clean[y_var].values
+        X = sm.add_constant(data_clean[x_vars].values)  # Add constant for intercept
+        var_names = ['Intercept'] + x_vars
+        
         n_obs = len(data_clean)
         n_params = len(x_vars) + 1  # Including intercept
         
@@ -285,8 +289,8 @@ else:
         # Step 1: Estimate Location Parameters (α)
         # ==========================================
         st.info(f"Estimating location parameters at τ = {reference_quantile}...")
-        location_model = quantreg(formula, data_clean).fit(q=reference_quantile, vcov='robust')
-        alpha = location_model.params
+        location_model = QuantReg(y, X).fit(q=reference_quantile, vcov='robust')
+        alpha = pd.Series(location_model.params, index=var_names)
         alpha_se = location_model.bse
         alpha_pvalues = location_model.pvalues
         
@@ -307,7 +311,10 @@ else:
         h_low = norm.ppf(tau_low)    # Φ^(-1)(0.25) ≈ -0.674
         
         # Scale parameters: δ = [β(τ_high) - β(τ_low)] / [h(τ_high) - h(τ_low)]
-        delta = (model_high.params - model_low.params) / (h_high - h_low)
+        delta = pd.Series(
+            (model_high.params - model_low.params) / (h_high - h_low),
+            index=var_names
+        )
         
         # ==========================================
         # Step 3: Bootstrap Inference (Recommended)
@@ -325,23 +332,25 @@ else:
             for b in range(n_boot):
                 try:
                     # Resample with replacement
-                    boot_data = data_clean.sample(n=n_obs, replace=True).reset_index(drop=True)
+                    boot_indices = np.random.choice(n_obs, size=n_obs, replace=True)
+                    y_boot = y[boot_indices]
+                    X_boot = X[boot_indices, :]
                     
                     # Estimate location
-                    boot_loc = quantreg(formula, boot_data).fit(q=reference_quantile)
-                    boot_alpha.append(boot_loc.params.values)
+                    boot_loc = QuantReg(y_boot, X_boot).fit(q=reference_quantile)
+                    boot_alpha.append(boot_loc.params)
                     
                     # Estimate scale
-                    boot_high = quantreg(formula, boot_data).fit(q=tau_high)
-                    boot_low = quantreg(formula, boot_data).fit(q=tau_low)
+                    boot_high = QuantReg(y_boot, X_boot).fit(q=tau_high)
+                    boot_low = QuantReg(y_boot, X_boot).fit(q=tau_low)
                     boot_delta_b = (boot_high.params - boot_low.params) / (h_high - h_low)
-                    boot_delta.append(boot_delta_b.values)
+                    boot_delta.append(boot_delta_b)
                     
                     # MMQR coefficients for all quantiles
                     for tau in quantiles:
                         h_tau = norm.ppf(tau)
                         beta_tau = boot_loc.params + boot_delta_b * h_tau
-                        boot_beta[tau].append(beta_tau.values)
+                        boot_beta[tau].append(beta_tau)
                     
                 except Exception as e:
                     continue
@@ -361,22 +370,22 @@ else:
             
             # Calculate bootstrap p-values (two-sided)
             alpha_pvalues_boot = []
-            for i, var in enumerate(alpha.index):
+            for i, var in enumerate(var_names):
                 t_stat = alpha[var] / alpha_se_boot[i] if alpha_se_boot[i] > 0 else 0
                 p_val = 2 * (1 - t_dist.cdf(abs(t_stat), df=n_obs - n_params))
                 alpha_pvalues_boot.append(p_val)
             
             delta_pvalues_boot = []
-            for i, var in enumerate(delta.index):
+            for i, var in enumerate(var_names):
                 t_stat = delta[var] / delta_se_boot[i] if delta_se_boot[i] > 0 else 0
                 p_val = 2 * (1 - t_dist.cdf(abs(t_stat), df=n_obs - n_params))
                 delta_pvalues_boot.append(p_val)
             
             # Use bootstrap inference
-            alpha_se = pd.Series(alpha_se_boot, index=alpha.index)
-            delta_se = pd.Series(delta_se_boot, index=delta.index)
-            alpha_pvalues = pd.Series(alpha_pvalues_boot, index=alpha.index)
-            delta_pvalues = pd.Series(delta_pvalues_boot, index=delta.index)
+            alpha_se = pd.Series(alpha_se_boot, index=var_names)
+            delta_se = pd.Series(delta_se_boot, index=var_names)
+            alpha_pvalues = pd.Series(alpha_pvalues_boot, index=var_names)
+            delta_pvalues = pd.Series(delta_pvalues_boot, index=var_names)
             
         else:
             # Delta method for scale parameters (less reliable)
@@ -385,10 +394,10 @@ else:
             delta_se = {}
             delta_pvalues = {}
             
-            for var in delta.index:
+            for var in var_names:
                 # Variance using delta method
-                var_high = model_high.bse[var] ** 2
-                var_low = model_low.bse[var] ** 2
+                var_high = model_high.bse[var_names.index(var)] ** 2
+                var_low = model_low.bse[var_names.index(var)] ** 2
                 
                 # Conservative covariance estimate
                 cov_hl = 0.5 * np.sqrt(var_high * var_low)
@@ -421,26 +430,26 @@ else:
             # Standard errors using delta method or bootstrap
             if bootstrap and tau in boot_beta and len(boot_beta[tau]) > 0:
                 boot_beta_array = np.array(boot_beta[tau])
-                beta_se = pd.Series(np.std(boot_beta_array, axis=0), index=beta_tau.index)
+                beta_se = pd.Series(np.std(boot_beta_array, axis=0), index=var_names)
                 
                 # Bootstrap p-values
                 beta_pvalues = []
-                for i, var in enumerate(beta_tau.index):
+                for i, var in enumerate(var_names):
                     t_stat = beta_tau[var] / beta_se[var] if beta_se[var] > 0 else 0
                     p_val = 2 * (1 - t_dist.cdf(abs(t_stat), df=n_obs - n_params))
                     beta_pvalues.append(p_val)
-                beta_pvalues = pd.Series(beta_pvalues, index=beta_tau.index)
+                beta_pvalues = pd.Series(beta_pvalues, index=var_names)
             else:
                 # Delta method: Var[β(τ)] = Var[α] + h(τ)² · Var[δ] + 2·h(τ)·Cov[α,δ]
                 # Simplified: assume Cov[α,δ] ≈ 0
                 beta_se = np.sqrt(alpha_se**2 + (h_tau**2) * delta_se**2)
                 
                 beta_pvalues = []
-                for var in beta_tau.index:
+                for var in var_names:
                     t_stat = beta_tau[var] / beta_se[var] if beta_se[var] > 0 else 0
                     p_val = 2 * (1 - t_dist.cdf(abs(t_stat), df=n_obs - n_params))
                     beta_pvalues.append(p_val)
-                beta_pvalues = pd.Series(beta_pvalues, index=beta_tau.index)
+                beta_pvalues = pd.Series(beta_pvalues, index=var_names)
             
             # Confidence intervals
             ci_lower = beta_tau - 1.96 * beta_se
