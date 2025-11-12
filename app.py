@@ -186,240 +186,101 @@ if numeric_cols:
 else:
     st.warning("No numeric variables for correlation.")
 
-# ===================================================
-# 🟩 SECTION 4: MMQR estimation and results
-# ===================================================
+# ===============================================================
+# 🟩 SECTION: MM-Quantile Regression Results (Location & Scale)
+# ===============================================================
 
-# ... your code for estimating quantiles, storing results in mmqr_results ...
-# mmqr_results[q] = {"model": model, "mmqr_coefficients": ..., "pvalues": ...}
+st.header("Table 4: MM-Quantile Regression Estimation Results")
 
-# ⬇️ Place the following block immediately AFTER all MMQR quantile regressions
-# ===================================================
-# LOCATION & SCALE RESULTS SECTION
-# ===================================================
+# Ensure quantiles exist
+quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
 
-# [Paste the big location–scale block I gave you here]
-# ========================
-# Location & Scale results (display + CSV)
-# ========================
-import numpy as np
-import pandas as pd
-import statsmodels.formula.api as smf
-from tqdm import trange
-
-# --- Parameters for scale calculation ---
-tau_low = 0.25
-tau_high = 0.75
-tau_diff = tau_high - tau_low
-ref_q = reference_quantile if 'reference_quantile' in globals() else 0.5
-bootstrap_for_scale = bootstrap_ci if 'bootstrap_ci' in globals() else False
-n_boot = int(n_bootstrap) if 'n_bootstrap' in globals() else 200
-
-# --- Ensure mmqr_results exist (rebuild if not) ---
-if 'mmqr_results' not in globals() or not isinstance(mmqr_results, dict):
+# Ensure mmqr_results exist
+if "mmqr_results" not in locals():
     mmqr_results = {}
-    for q in quantiles:
-        try:
-            model = smf.quantreg(f"{dep_var} ~ {' + '.join(indep_vars)}", data=df).fit(q=q)
-            mmqr_results[q] = {
-                "model": model,
-                "mmqr_coefficients": model.params,
-                "pvalues": model.pvalues,
-                "coefficients": model.params
-            }
-        except Exception as e:
-            st.warning(f"Failed to run quantile {q}: {e}")
+    for tau in quantiles:
+        model = smf.quantreg("IT ~ gbi + GDP + REER + TGGE + PS + AT", data=df).fit(q=tau)
+        mmqr_results[tau] = {
+            "model": model,
+            "mmqr_coefficients": model.params,
+            "pvalues": model.pvalues,
+            "coefficients": model.params
+        }
 
-# --- 1) Location parameters (reference quantile) ---
-st.subheader(f"Table: Location parameters (reference quantile τ = {ref_q})")
-if ref_q not in mmqr_results:
-    try:
-        model_ref = smf.quantreg(f"{dep_var} ~ {' + '.join(indep_vars)}", data=df).fit(q=ref_q)
-        mmqr_results[ref_q] = {"model": model_ref, "mmqr_coefficients": model_ref.params,
-                               "pvalues": model_ref.pvalues, "coefficients": model_ref.params}
-    except Exception as e:
-        st.error(f"Cannot estimate reference quantile {ref_q}: {e}")
-        model_ref = None
-else:
-    model_ref = mmqr_results[ref_q]["model"]
+# -----------------------------
+# Location parameters (coefficients)
+# -----------------------------
+mmqr_location = []
+coef_names = mmqr_results[quantiles[0]]["coefficients"].index.tolist()
 
-location_rows = []
-if model_ref is not None:
-    for var in model_ref.params.index:
-        coef = float(model_ref.params[var])
-        try:
-            se = float(model_ref.bse[var])
-        except Exception:
-            se = np.nan
-        try:
-            pval = float(model_ref.pvalues[var])
-        except Exception:
-            pval = np.nan
-        stars = '***' if pval < 0.01 else '**' if pval < 0.05 else '*' if pval < 0.1 else ''
-        location_rows.append({
-            "Variable": "Intercept" if var.lower() in ["_cons", "intercept"] else var,
-            "Coefficient": round(coef, 3),
-            "Std. Error": round(se, 3) if np.isfinite(se) else "NA",
-            "P-Value": round(pval, 3) if np.isfinite(pval) else "NA",
-            "Signif": stars
-        })
-location_df = pd.DataFrame(location_rows)
-st.dataframe(location_df, use_container_width=True)
+for var in coef_names:
+    row = {"Variable": "Intercept" if var.lower() in ["_cons", "intercept"] else var}
+    for tau in quantiles:
+        model = mmqr_results[tau]["model"]
+        coef = mmqr_results[tau]["mmqr_coefficients"].get(var, np.nan)
+        se = model.bse.get(var, np.nan)
+        pval = mmqr_results[tau]["pvalues"].get(var, np.nan)
 
-# --- 2) Scale parameters: (Q_high - Q_low) / (tau_high - tau_low) ---
-st.subheader(f"Table: Scale parameters (based on τ={tau_low} and τ={tau_high})")
-
-# Ensure models at tau_low and tau_high exist
-for q in (tau_low, tau_high):
-    if q not in mmqr_results:
-        try:
-            m = smf.quantreg(f"{dep_var} ~ {' + '.join(indep_vars)}", data=df).fit(q=q)
-            mmqr_results[q] = {"model": m, "mmqr_coefficients": m.params,
-                               "pvalues": m.pvalues, "coefficients": m.params}
-        except Exception as e:
-            st.error(f"Cannot estimate quantile {q}: {e}")
-
-# Extract params
-model_low = mmqr_results.get(tau_low, {}).get("model", None)
-model_high = mmqr_results.get(tau_high, {}).get("model", None)
-
-scale_rows = []
-if model_low is None or model_high is None:
-    st.error("Missing low/high quantile models; scale parameters cannot be computed.")
-else:
-    params_low = model_low.params
-    params_high = model_high.params
-
-    # Delta-method conservative variance: Var(scale) ≈ (Var(high) + Var(low)) / tau_diff^2
-    var_high = (model_high.bse ** 2).to_dict()
-    var_low = (model_low.bse ** 2).to_dict()
-
-    # Optional bootstrap to estimate SEs and p-values for scale
-    boot_scale = None
-    if bootstrap_for_scale and n_boot > 0:
-        st.info(f"Bootstrapping scale SEs ({n_boot} draws)...")
-        boot_scale = {var: [] for var in params_high.index}
-        for i in range(n_boot):
-            boot_samp = df.sample(n=len(df), replace=True)
-            try:
-                bh = smf.quantreg(f"{dep_var} ~ {' + '.join(indep_vars)}", data=boot_samp).fit(q=tau_high)
-                bl = smf.quantreg(f"{dep_var} ~ {' + '.join(indep_vars)}", data=boot_samp).fit(q=tau_low)
-                bscale = (bh.params - bl.params) / tau_diff
-                for var in params_high.index:
-                    boot_scale[var].append(bscale.get(var, np.nan))
-            except Exception:
-                continue
-
-    for var in params_high.index:
-        scale_val = float((params_high[var] - params_low[var]) / tau_diff)
-        # compute se:
-        se_scale = np.nan
-        pval_scale = np.nan
-
-        # prefer bootstrap SE/pval if available
-        if boot_scale is not None and len(boot_scale.get(var, [])) > 0:
-            arr = np.array(boot_scale[var])
-            # remove nans
-            arr = arr[np.isfinite(arr)]
-            if len(arr) > 0:
-                se_scale = float(np.std(arr, ddof=1))
-                # two-sided p-value from bootstrap distribution
-                # p = proportion of bootstrap estimates more extreme than observed (two-sided)
-                pval_scale = 2 * min(np.mean(arr >= scale_val), np.mean(arr <= scale_val))
+        if pval < 0.01:
+            stars = "***"
+        elif pval < 0.05:
+            stars = "**"
+        elif pval < 0.10:
+            stars = "*"
         else:
-            # delta-method approximate (conservative; assumes cov=0)
-            vh = var_high.get(var, np.nan)
-            vl = var_low.get(var, np.nan)
-            if np.isfinite(vh) and np.isfinite(vl):
-                var_scale = (vh + vl) / (tau_diff ** 2)
-                if var_scale >= 0:
-                    se_scale = float(np.sqrt(var_scale))
-                    # Student-t p-value with df = n - k - 1
-                    dfree = max(len(df) - len(indep_vars) - 1, 1)
-                    tstat = scale_val / se_scale if se_scale > 0 else 0.0
-                    from scipy import stats
-                    pval_scale = float(2 * (1 - stats.t.cdf(abs(tstat), df=dfree)))
-        stars = ''
-        if np.isfinite(pval_scale):
-            if pval_scale < 0.01:
-                stars = '***'
-            elif pval_scale < 0.05:
-                stars = '**'
-            elif pval_scale < 0.1:
-                stars = '*'
+            stars = ""
 
-        scale_rows.append({
-            "Variable": "Intercept" if var.lower() in ["_cons", "intercept"] else var,
-            "Scale Coef": round(scale_val, 3),
-            "Std. Error": round(se_scale, 3) if np.isfinite(se_scale) else "NA",
-            "P-Value": round(pval_scale, 3) if np.isfinite(pval_scale) else "NA",
-            "Signif": stars
-        })
+        row[f"τ = {tau}"] = f"{coef:.3f} ({se:.3f}){stars}"
+    mmqr_location.append(row)
 
-scale_df = pd.DataFrame(scale_rows)
-st.dataframe(scale_df, use_container_width=True)
+mmqr_location_df = pd.DataFrame(mmqr_location)
 
-# === Add location & scale to download bundle ===
-# Prepare combined download table (location + scale + mmqr)
-download_rows = []
+st.subheader("Location Parameters (Coefficient Estimates)")
+st.write("Standard errors in parentheses. *** p < 0.01, ** p < 0.05, * p < 0.10.")
+st.dataframe(mmqr_location_df, use_container_width=True)
 
-# location
-for r in location_rows:
-    download_rows.append({
-        "Variable": r["Variable"],
-        "Type": "Location",
-        "Coefficient": r["Coefficient"],
-        "StdError": r["Std. Error"],
-        "PValue": r["P-Value"],
-        "Significance": r["Signif"],
-        "Quantile": ref_q
-    })
+# -----------------------------
+# Scale parameters (conditional variance)
+# -----------------------------
+mmqr_scale = []
+for var in coef_names:
+    row = {"Variable": "Intercept" if var.lower() in ["_cons", "intercept"] else var}
+    for tau in quantiles:
+        model = mmqr_results[tau]["model"]
+        resid = model.resid
+        scale_val = np.var(resid)
+        row[f"τ = {tau}"] = f"{scale_val:.3f}"
+    mmqr_scale.append(row)
 
-# scale
-for r in scale_rows:
-    download_rows.append({
-        "Variable": r["Variable"],
-        "Type": "Scale",
-        "Coefficient": r["Scale Coef"],
-        "StdError": r["Std. Error"],
-        "PValue": r["P-Value"],
-        "Significance": r["Signif"],
-        "Quantile": "NA"
-    })
+mmqr_scale_df = pd.DataFrame(mmqr_scale)
 
-# mmqr coefficients (existing structure)
-first_q = next((q for q in quantiles if q in mmqr_results), None)
-if first_q is not None:
-    coef_names = mmqr_results[first_q]["coefficients"].index.tolist()
-    for var in coef_names:
-        for q in quantiles:
-            if q in mmqr_results:
-                coef = mmqr_results[q]["mmqr_coefficients"].get(var, np.nan)
-                try:
-                    se = mmqr_results[q]["model"].bse.get(var, np.nan)
-                except Exception:
-                    se = np.nan
-                try:
-                    pval = mmqr_results[q]["pvalues"].get(var, np.nan)
-                except Exception:
-                    pval = np.nan
-                download_rows.append({
-                    "Variable": "Intercept" if var.lower() in ["_cons", "intercept"] else var,
-                    "Type": f"MMQR_τ={q}",
-                    "Coefficient": round(float(coef), 3) if np.isfinite(coef) else "NA",
-                    "StdError": round(float(se), 3) if np.isfinite(se) else "NA",
-                    "PValue": round(float(pval), 3) if np.isfinite(pval) else "NA",
-                    "Significance": '***' if pval < 0.01 else '**' if pval < 0.05 else '*' if pval < 0.1 else '',
-                    "Quantile": q
-                })
+st.subheader("Scale Parameters (Conditional Variance)")
+st.write("Variance of residuals at each quantile.")
+st.dataframe(mmqr_scale_df, use_container_width=True)
 
-download_df = pd.DataFrame(download_rows)
-csv_out = "MMQR_Combined_Location_Scale_MMQR.csv"
-download_df.to_csv(csv_out, index=False)
-st.success(f"Combined results saved to {csv_out}")
-with open(csv_out, "rb") as f:
-    st.download_button("⬇️ Download Combined Location/Scale/MMQR (CSV)", data=f, file_name=csv_out, mime="text/csv")
+# -----------------------------
+# Export both tables
+# -----------------------------
+mmqr_location_df.to_csv("MMQR_Location_Results.csv", index=False)
+mmqr_scale_df.to_csv("MMQR_Scale_Results.csv", index=False)
 
+st.success("✅ MM-Quantile Regression results exported successfully.")
+
+with open("MMQR_Location_Results.csv", "rb") as f:
+    st.download_button(
+        label="⬇️ Download Location Results (CSV)",
+        data=f,
+        file_name="MMQR_Location_Results.csv",
+        mime="text/csv"
+    )
+
+with open("MMQR_Scale_Results.csv", "rb") as f:
+    st.download_button(
+        label="⬇️ Download Scale Results (CSV)",
+        data=f,
+        file_name="MMQR_Scale_Results.csv",
+        mime="text/csv"
+    )
 
 # ============================================
 # Footer
