@@ -238,11 +238,11 @@ st.dataframe(scale_table)
 
 # --- Step 5: MMQR Coefficients, SEs, and P-values Across Quantiles ---
 quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
-mmqr_results, mmqr_se, mmqr_p = {}, {}, {}
+mmqr_coef, mmqr_se, mmqr_p = {}, {}, {}
 
 for q in quantiles:
     coeff_q = location_params + scale_params * q
-    mmqr_results[q] = coeff_q
+    mmqr_coef[q] = coeff_q
 
     se_q = np.sqrt(location_se**2 + (q**2) * scale_se**2)
     mmqr_se[q] = se_q
@@ -251,24 +251,25 @@ for q in quantiles:
     p_vals = 2 * (1 - stats.t.cdf(np.abs(t_vals), df=df_resid))
     mmqr_p[q] = p_vals
 
-# --- Step 6: Merge all into compact stacked-cell format ---
-formatted = {}
+# --- Step 6: Combine into one wide table (Coef–Std–P order per quantile) ---
+combined_cols = {}
 for q in quantiles:
-    formatted[q] = mmqr_results[q].round(3).astype(str) + " (" + \
-                   mmqr_se[q].round(3).astype(str) + ") [" + \
-                   mmqr_p[q].round(3).astype(str) + "]"
+    combined_cols[(f"τ={q}", "Coefficient")] = mmqr_coef[q].round(3)
+    combined_cols[(f"τ={q}", "Std. Error")] = mmqr_se[q].round(3)
+    combined_cols[(f"τ={q}", "P-Value")] = mmqr_p[q].round(3)
 
-mmqr_df = pd.DataFrame(formatted)
+mmqr_df = pd.concat(combined_cols, axis=1)
 
-st.subheader("MMQR Results: Coefficient (Std. Error) [P-Value] Across Quantiles")
-st.markdown("Each cell shows: Coefficient (Std. Error) [P-Value]")
+# --- Proper multiindex formatting ---
+mmqr_df.columns = pd.MultiIndex.from_tuples(mmqr_df.columns)
+st.subheader("MMQR Results: Coefficient – Std. Error – P-Value by Quantile")
 st.dataframe(mmqr_df)
 
 # --- Step 7: Plot Coefficient Dynamics ---
 st.subheader("Coefficient Dynamics by Quantile")
 fig, ax = plt.subplots(figsize=(8, 5))
 for var in indep_vars:
-    ax.plot(quantiles, [mmqr_results[q][var] for q in quantiles],
+    ax.plot(quantiles, [mmqr_coef[q][var] for q in quantiles],
             marker="o", label=var)
 ax.axhline(0, color="black", linewidth=0.8)
 ax.set_xlabel("Quantile (τ)")
@@ -283,16 +284,15 @@ out_text.append("=== LOCATION PARAMETERS ===\n")
 out_text.append(loc_table.to_string())
 out_text.append("\n\n=== SCALE PARAMETERS ===\n")
 out_text.append(scale_table.to_string())
-out_text.append("\n\n=== MMQR COEFFICIENTS (Coef, Std.Err, P-Value) ACROSS QUANTILES ===\n")
+out_text.append("\n\n=== MMQR RESULTS (Coef, Std.Err, P-Value by Quantile) ===\n")
 out_text.append(mmqr_df.to_string())
 
 st.download_button(
-    "📥 Download MMQR Compact Results (RTF)",
+    "📥 Download MMQR Full Table (RTF)",
     data="\n".join(out_text),
-    file_name="MMQR_Compact_Results.rtf",
+    file_name="MMQR_Results_ByQuantile.rtf",
     mime="application/rtf"
 )
-
 
 # ============================================
 # Footer
