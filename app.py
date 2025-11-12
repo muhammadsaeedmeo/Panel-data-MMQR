@@ -192,7 +192,7 @@ else:
 # Section 4: Method of Moments Quantile Regression (MMQR)
 # ============================================
 
-st.header("Section 4: Method of Moments Quantile Regression (MMQR) [Make my MMQR results academically readable. Format with coefficient, standard error (in parentheses), and p-value (in brackets). Add significance stars (***, **, *), and give me a Word file.”]")
+st.header("Section 4: Method of Moments Quantile Regression (MMQR)")
 
 # --- Step 1: Normalize variables ---
 numeric_cols = [dep_var] + indep_vars
@@ -293,4 +293,4 @@ st.download_button(
 # ============================================
 
 st.markdown("---")
-st.markdown("**Panel Data Analysis Dashboard** | Built with Streamlit")
+st.markdown("**[Make my MMQR results academically readable. Format with coefficient, standard error (in parentheses), and p-value (in brackets). Add significance stars (***, **, *), and give me a Word file** | Built with Streamlit")
