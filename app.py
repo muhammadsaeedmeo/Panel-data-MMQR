@@ -191,11 +191,22 @@ else:
 # ===============================================================
 st.header("Table 4: MM-Quantile Regression Estimation Results")
 
-# Prepare results storage
+# If mmqr_results not created yet, rebuild it
+if "mmqr_results" not in locals():
+    mmqr_results = {}
+    for tau in quantiles:
+        model = smf.quantreg("IT ~ gbi + GDP + REER + TGGE + PS + AT", data=df).fit(q=tau)
+        mmqr_results[tau] = {
+            "model": model,
+            "mmqr_coefficients": model.params,
+            "pvalues": model.pvalues,
+            "coefficients": model.params
+        }
+
+# Prepare table
 mmqr_data = []
 coef_names = mmqr_results[quantiles[0]]["coefficients"].index.tolist()
 
-# Build formatted result matrix for each variable across quantiles
 for var in coef_names:
     var_label = "Intercept" if var.lower() in ["_cons", "intercept"] else var
     row = {"Variable": var_label}
@@ -220,28 +231,20 @@ for var in coef_names:
         else:
             stars = ""
 
-        # formatted academic-style string
         row[f"τ = {tau}"] = f"{coef:.3f} ({se:.3f}){stars}"
 
     mmqr_data.append(row)
 
-# Convert to dataframe
 mmqr_df = pd.DataFrame(mmqr_data)
 
-# Display results nicely in Streamlit
 st.write("Coefficients with robust standard errors in parentheses. "
          "*** p < 0.01, ** p < 0.05, * p < 0.10.")
 st.dataframe(mmqr_df, use_container_width=True)
 
-# ===============================================================
-# Export results
-# ===============================================================
-# Save academic-style CSV for documentation or Word import
+# Export
 mmqr_df.to_csv("MMQR_Results_Academic.csv", index=False)
-
 st.success("✅ MM-Quantile Regression results exported successfully as 'MMQR_Results_Academic.csv'.")
 
-# Optionally allow download inside Streamlit
 with open("MMQR_Results_Academic.csv", "rb") as f:
     st.download_button(
         label="⬇️ Download MMQR Results (CSV)",
@@ -249,7 +252,6 @@ with open("MMQR_Results_Academic.csv", "rb") as f:
         file_name="MMQR_Results_Academic.csv",
         mime="text/csv"
     )
-
 
 # ============================================
 # Footer
