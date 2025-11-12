@@ -186,128 +186,240 @@ if numeric_cols:
 else:
     st.warning("No numeric variables for correlation.")
 
-# === Robust, self-contained Table 4 block: MMQR results with SEs & stars ===
+# ===================================================
+# 🟩 SECTION 4: MMQR estimation and results
+# ===================================================
+
+# ... your code for estimating quantiles, storing results in mmqr_results ...
+# mmqr_results[q] = {"model": model, "mmqr_coefficients": ..., "pvalues": ...}
+
+# ⬇️ Place the following block immediately AFTER all MMQR quantile regressions
+# ===================================================
+# LOCATION & SCALE RESULTS SECTION
+# ===================================================
+
+# [Paste the big location–scale block I gave you here]
+# ========================
+# Location & Scale results (display + CSV)
+# ========================
 import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
+from tqdm import trange
 
-# --- Safeguards: ensure required objects exist ---
-if 'df' not in globals():
-    st.error("Dataframe 'df' not found. Make sure data is loaded earlier in the app.")
+# --- Parameters for scale calculation ---
+tau_low = 0.25
+tau_high = 0.75
+tau_diff = tau_high - tau_low
+ref_q = reference_quantile if 'reference_quantile' in globals() else 0.5
+bootstrap_for_scale = bootstrap_ci if 'bootstrap_ci' in globals() else False
+n_boot = int(n_bootstrap) if 'n_bootstrap' in globals() else 200
+
+# --- Ensure mmqr_results exist (rebuild if not) ---
+if 'mmqr_results' not in globals() or not isinstance(mmqr_results, dict):
+    mmqr_results = {}
+    for q in quantiles:
+        try:
+            model = smf.quantreg(f"{dep_var} ~ {' + '.join(indep_vars)}", data=df).fit(q=q)
+            mmqr_results[q] = {
+                "model": model,
+                "mmqr_coefficients": model.params,
+                "pvalues": model.pvalues,
+                "coefficients": model.params
+            }
+        except Exception as e:
+            st.warning(f"Failed to run quantile {q}: {e}")
+
+# --- 1) Location parameters (reference quantile) ---
+st.subheader(f"Table: Location parameters (reference quantile τ = {ref_q})")
+if ref_q not in mmqr_results:
+    try:
+        model_ref = smf.quantreg(f"{dep_var} ~ {' + '.join(indep_vars)}", data=df).fit(q=ref_q)
+        mmqr_results[ref_q] = {"model": model_ref, "mmqr_coefficients": model_ref.params,
+                               "pvalues": model_ref.pvalues, "coefficients": model_ref.params}
+    except Exception as e:
+        st.error(f"Cannot estimate reference quantile {ref_q}: {e}")
+        model_ref = None
 else:
-    # default dep/indep if missing (you likely already have these defined)
-    if 'dep_var' not in globals():
-        st.error("Dependent variable 'dep_var' not found.")
-    elif 'indep_vars' not in globals() or not indep_vars:
-        st.error("Independent variables 'indep_vars' not found or empty.")
-    else:
-        # Normalize quantiles variable (accept either list or comma-separated string)
-        if 'quantiles' not in globals() or quantiles is None:
-            quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
+    model_ref = mmqr_results[ref_q]["model"]
+
+location_rows = []
+if model_ref is not None:
+    for var in model_ref.params.index:
+        coef = float(model_ref.params[var])
+        try:
+            se = float(model_ref.bse[var])
+        except Exception:
+            se = np.nan
+        try:
+            pval = float(model_ref.pvalues[var])
+        except Exception:
+            pval = np.nan
+        stars = '***' if pval < 0.01 else '**' if pval < 0.05 else '*' if pval < 0.1 else ''
+        location_rows.append({
+            "Variable": "Intercept" if var.lower() in ["_cons", "intercept"] else var,
+            "Coefficient": round(coef, 3),
+            "Std. Error": round(se, 3) if np.isfinite(se) else "NA",
+            "P-Value": round(pval, 3) if np.isfinite(pval) else "NA",
+            "Signif": stars
+        })
+location_df = pd.DataFrame(location_rows)
+st.dataframe(location_df, use_container_width=True)
+
+# --- 2) Scale parameters: (Q_high - Q_low) / (tau_high - tau_low) ---
+st.subheader(f"Table: Scale parameters (based on τ={tau_low} and τ={tau_high})")
+
+# Ensure models at tau_low and tau_high exist
+for q in (tau_low, tau_high):
+    if q not in mmqr_results:
+        try:
+            m = smf.quantreg(f"{dep_var} ~ {' + '.join(indep_vars)}", data=df).fit(q=q)
+            mmqr_results[q] = {"model": m, "mmqr_coefficients": m.params,
+                               "pvalues": m.pvalues, "coefficients": m.params}
+        except Exception as e:
+            st.error(f"Cannot estimate quantile {q}: {e}")
+
+# Extract params
+model_low = mmqr_results.get(tau_low, {}).get("model", None)
+model_high = mmqr_results.get(tau_high, {}).get("model", None)
+
+scale_rows = []
+if model_low is None or model_high is None:
+    st.error("Missing low/high quantile models; scale parameters cannot be computed.")
+else:
+    params_low = model_low.params
+    params_high = model_high.params
+
+    # Delta-method conservative variance: Var(scale) ≈ (Var(high) + Var(low)) / tau_diff^2
+    var_high = (model_high.bse ** 2).to_dict()
+    var_low = (model_low.bse ** 2).to_dict()
+
+    # Optional bootstrap to estimate SEs and p-values for scale
+    boot_scale = None
+    if bootstrap_for_scale and n_boot > 0:
+        st.info(f"Bootstrapping scale SEs ({n_boot} draws)...")
+        boot_scale = {var: [] for var in params_high.index}
+        for i in range(n_boot):
+            boot_samp = df.sample(n=len(df), replace=True)
+            try:
+                bh = smf.quantreg(f"{dep_var} ~ {' + '.join(indep_vars)}", data=boot_samp).fit(q=tau_high)
+                bl = smf.quantreg(f"{dep_var} ~ {' + '.join(indep_vars)}", data=boot_samp).fit(q=tau_low)
+                bscale = (bh.params - bl.params) / tau_diff
+                for var in params_high.index:
+                    boot_scale[var].append(bscale.get(var, np.nan))
+            except Exception:
+                continue
+
+    for var in params_high.index:
+        scale_val = float((params_high[var] - params_low[var]) / tau_diff)
+        # compute se:
+        se_scale = np.nan
+        pval_scale = np.nan
+
+        # prefer bootstrap SE/pval if available
+        if boot_scale is not None and len(boot_scale.get(var, [])) > 0:
+            arr = np.array(boot_scale[var])
+            # remove nans
+            arr = arr[np.isfinite(arr)]
+            if len(arr) > 0:
+                se_scale = float(np.std(arr, ddof=1))
+                # two-sided p-value from bootstrap distribution
+                # p = proportion of bootstrap estimates more extreme than observed (two-sided)
+                pval_scale = 2 * min(np.mean(arr >= scale_val), np.mean(arr <= scale_val))
         else:
-            # if quantiles came from a text_input, it might be a string
-            if isinstance(quantiles, str):
+            # delta-method approximate (conservative; assumes cov=0)
+            vh = var_high.get(var, np.nan)
+            vl = var_low.get(var, np.nan)
+            if np.isfinite(vh) and np.isfinite(vl):
+                var_scale = (vh + vl) / (tau_diff ** 2)
+                if var_scale >= 0:
+                    se_scale = float(np.sqrt(var_scale))
+                    # Student-t p-value with df = n - k - 1
+                    dfree = max(len(df) - len(indep_vars) - 1, 1)
+                    tstat = scale_val / se_scale if se_scale > 0 else 0.0
+                    from scipy import stats
+                    pval_scale = float(2 * (1 - stats.t.cdf(abs(tstat), df=dfree)))
+        stars = ''
+        if np.isfinite(pval_scale):
+            if pval_scale < 0.01:
+                stars = '***'
+            elif pval_scale < 0.05:
+                stars = '**'
+            elif pval_scale < 0.1:
+                stars = '*'
+
+        scale_rows.append({
+            "Variable": "Intercept" if var.lower() in ["_cons", "intercept"] else var,
+            "Scale Coef": round(scale_val, 3),
+            "Std. Error": round(se_scale, 3) if np.isfinite(se_scale) else "NA",
+            "P-Value": round(pval_scale, 3) if np.isfinite(pval_scale) else "NA",
+            "Signif": stars
+        })
+
+scale_df = pd.DataFrame(scale_rows)
+st.dataframe(scale_df, use_container_width=True)
+
+# === Add location & scale to download bundle ===
+# Prepare combined download table (location + scale + mmqr)
+download_rows = []
+
+# location
+for r in location_rows:
+    download_rows.append({
+        "Variable": r["Variable"],
+        "Type": "Location",
+        "Coefficient": r["Coefficient"],
+        "StdError": r["Std. Error"],
+        "PValue": r["P-Value"],
+        "Significance": r["Signif"],
+        "Quantile": ref_q
+    })
+
+# scale
+for r in scale_rows:
+    download_rows.append({
+        "Variable": r["Variable"],
+        "Type": "Scale",
+        "Coefficient": r["Scale Coef"],
+        "StdError": r["Std. Error"],
+        "PValue": r["P-Value"],
+        "Significance": r["Signif"],
+        "Quantile": "NA"
+    })
+
+# mmqr coefficients (existing structure)
+first_q = next((q for q in quantiles if q in mmqr_results), None)
+if first_q is not None:
+    coef_names = mmqr_results[first_q]["coefficients"].index.tolist()
+    for var in coef_names:
+        for q in quantiles:
+            if q in mmqr_results:
+                coef = mmqr_results[q]["mmqr_coefficients"].get(var, np.nan)
                 try:
-                    quantiles = [float(q.strip()) for q in quantiles.split(',') if q.strip() != ""]
+                    se = mmqr_results[q]["model"].bse.get(var, np.nan)
                 except Exception:
-                    quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
-            # if it's already a list/tuple, ensure floats
-            else:
-                quantiles = [float(q) for q in quantiles]
-
-        # Guard against empty quantiles after parsing
-        if len(quantiles) == 0:
-            quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
-
-        # Build formula from dep_var and indep_vars
-        rhs = " + ".join(indep_vars)
-        formula = f"{dep_var} ~ {rhs}"
-
-        # Rebuild mmqr_results if missing or incomplete
-        if 'mmqr_results' not in globals() or not isinstance(mmqr_results, dict) or any(q not in mmqr_results for q in quantiles):
-            mmqr_results = {}
-            progress = st.progress(0)
-            for i, q in enumerate(quantiles):
+                    se = np.nan
                 try:
-                    # Attempt robust vcov first; fallback to default fit
-                    try:
-                        model = smf.quantreg(formula, data=df).fit(q=q, vcov='robust')
-                    except TypeError:
-                        # older statsmodels might not accept vcov argument in fit
-                        model = smf.quantreg(formula, data=df).fit(q=q)
-                    mmqr_results[q] = {
-                        "model": model,
-                        "mmqr_coefficients": model.params,
-                        "pvalues": model.pvalues,
-                        "coefficients": model.params
-                    }
-                except Exception as e:
-                    st.warning(f"Quantile regression failed at q={q}: {e}")
-                progress.progress(int((i + 1) / len(quantiles) * 100))
-            progress.empty()
+                    pval = mmqr_results[q]["pvalues"].get(var, np.nan)
+                except Exception:
+                    pval = np.nan
+                download_rows.append({
+                    "Variable": "Intercept" if var.lower() in ["_cons", "intercept"] else var,
+                    "Type": f"MMQR_τ={q}",
+                    "Coefficient": round(float(coef), 3) if np.isfinite(coef) else "NA",
+                    "StdError": round(float(se), 3) if np.isfinite(se) else "NA",
+                    "PValue": round(float(pval), 3) if np.isfinite(pval) else "NA",
+                    "Significance": '***' if pval < 0.01 else '**' if pval < 0.05 else '*' if pval < 0.1 else '',
+                    "Quantile": q
+                })
 
-        # Prepare academic-style table: coef (se)stars
-        st.subheader("Table 4: MMQR Estimation Results (coef (SE) and significance stars)")
-        mmqr_rows = []
-        # Use first available quantile to extract coefficient names
-        first_q = next((q for q in quantiles if q in mmqr_results), None)
-        if first_q is None:
-            st.error("No quantile results available to display.")
-        else:
-            coef_names = mmqr_results[first_q]["coefficients"].index.tolist()
+download_df = pd.DataFrame(download_rows)
+csv_out = "MMQR_Combined_Location_Scale_MMQR.csv"
+download_df.to_csv(csv_out, index=False)
+st.success(f"Combined results saved to {csv_out}")
+with open(csv_out, "rb") as f:
+    st.download_button("⬇️ Download Combined Location/Scale/MMQR (CSV)", data=f, file_name=csv_out, mime="text/csv")
 
-            for var in coef_names:
-                display_name = "Intercept" if var.lower() in ["_cons", "intercept"] else var
-                row = {"Variable": display_name}
-                for q in quantiles:
-                    if q not in mmqr_results:
-                        row[f"τ = {q}"] = ""
-                        continue
-                    model_obj = mmqr_results[q]["model"]
-                    # coef from mmqr_coefficients (keeps any mmqr transform)
-                    coef = float(mmqr_results[q]["mmqr_coefficients"].get(var, np.nan))
-                    # robust se if available in model_obj.bse, else try model_obj.std_errors or fallback to np.nan
-                    try:
-                        se = float(model_obj.bse.get(var, np.nan))
-                    except Exception:
-                        try:
-                            se = float(model_obj.bse[var])
-                        except Exception:
-                            se = np.nan
-                    try:
-                        pval = float(mmqr_results[q]["pvalues"].get(var, np.nan))
-                    except Exception:
-                        pval = np.nan
-
-                    # significance stars
-                    if not np.isfinite(pval):
-                        stars = ""
-                    elif pval < 0.01:
-                        stars = "***"
-                    elif pval < 0.05:
-                        stars = "**"
-                    elif pval < 0.1:
-                        stars = "*"
-                    else:
-                        stars = ""
-
-                    # format safely even if se or coef are nan
-                    coef_str = f"{coef:.3f}" if np.isfinite(coef) else "NA"
-                    se_str = f"{se:.3f}" if np.isfinite(se) else "NA"
-                    row[f"τ = {q}"] = f"{coef_str} ({se_str}){stars}"
-
-                mmqr_rows.append(row)
-
-            mmqr_df = pd.DataFrame(mmqr_rows)
-            st.write("Note: coefficients with robust standard errors in parentheses. *** p<0.01, ** p<0.05, * p<0.10.")
-            st.dataframe(mmqr_df, use_container_width=True)
-
-            # Export CSV and allow download
-            csv_path = "MMQR_Results_Academic.csv"
-            mmqr_df.to_csv(csv_path, index=False)
-            st.success(f"MMQR results saved to '{csv_path}'.")
-            with open(csv_path, "rb") as f:
-                st.download_button("⬇️ Download MMQR Results (CSV)", data=f, file_name=csv_path, mime="text/csv")
 
 # ============================================
 # Footer
