@@ -186,64 +186,68 @@ if numeric_cols:
 else:
     st.warning("No numeric variables for correlation.")
 
-# ============================================
-# SECTION 4: MM-Quantile Regression (Normalized)
-# ============================================
+* ============================================================
+* 🟩 FULL MMQR ANALYSIS ACROSS QUANTILES WITH PLOT AND TABLE
+* ============================================================
 
-st.header("Section 4: Method of Moments Quantile Regression (MMQR)")
+clear all
+set more off
 
-# --- Normalize variables (Z-score) ---
-numeric_cols = [dep_var] + indep_vars
-df_norm = df.copy()
-for col in numeric_cols:
-    df_norm[col] = (df_norm[col] - df_norm[col].mean()) / df_norm[col].std()
+*--- Load your dataset
+use "your_data.dta", clear
 
-st.markdown("All variables have been standardized (mean = 0, standard deviation = 1).")
+*--- Install dependencies (run once)
+ssc install moremata, replace
 
-# --- MMQR estimation across quantiles ---
-quantiles = [0.05, 0.25, 0.5, 0.75, 0.95]
-formula = f"{dep_var} ~ {' + '.join(indep_vars)}"
+*--- Define dependent and independent variables
+local depvar tourism
+local indepvars reer gdp inflation exchange
 
-mmqr_results = {}
-progress = st.progress(0)
-for i, tau in enumerate(quantiles):
-    model = quantreg(formula, df_norm).fit(q=tau)
-    mmqr_results[tau] = model
-    progress.progress((i + 1) / len(quantiles))
+*--- Create a results file to store coefficients, SE, and p-values
+capture postclose mmqr_results
+postfile mmqr_results str20 varname quantile coef se pval using mmqr_results.dta, replace
 
-st.success("MM-Quantile Regression estimation completed successfully.")
+*--- Loop through quantiles
+foreach q of numlist 0.05(0.05)0.95 {
+    quietly mmqreg `depvar' `indepvars', quantile(`q')
+    matrix b = e(b)
+    matrix V = e(V)
+    local n = colsof(b)
 
-# --- Coefficient summary table ---
-results_df = pd.DataFrame({f"τ={tau:.2f}": model.params for tau, model in mmqr_results.items()})
-results_df = results_df.round(4)
-st.write("### Coefficient Estimates (Standardized)")
-st.dataframe(results_df)
+    forvalues i = 1/`n' {
+        local vname : colname b[`i']
+        local coef = b[1,`i']
+        local se = sqrt(V[`i',`i'])
+        local pval = 2*ttail(e(df_r), abs(`coef'/`se'))
+        post mmqr_results ("`vname'") (`q') (`coef') (`se') (`pval')
+    }
+}
+postclose mmqr_results
 
-# --- Plot coefficient variation ---
-st.write("### Coefficient Trajectories Across Quantiles")
-fig, ax = plt.subplots(figsize=(8, 5))
-for var in indep_vars:
-    ax.plot(quantiles, [mmqr_results[q].params[var] for q in quantiles],
-            marker="o", label=var)
-ax.set_xlabel("Quantile (τ)")
-ax.set_ylabel("Coefficient (Standardized)")
-ax.set_title("Coefficient Variation Across Quantiles")
-ax.legend()
-st.pyplot(fig)
+*--- Load results
+use mmqr_results.dta, clear
 
-# --- Export results ---
-buffer = []
-for tau, model in mmqr_results.items():
-    buffer.append(f"\n=== Quantile τ = {tau} ===\n")
-    buffer.append(model.summary().as_text())
-output_text = "\n".join(buffer)
+*--- Example: plot coefficient path for one key variable (reer)
+preserve
+keep if varname == "reer"
+gen ub = coef + 1.96*se
+gen lb = coef - 1.96*se
 
-st.download_button(
-    label="Download MMQR Results (RTF)",
-    data=output_text,
-    file_name="MMQR_results_normalized.rtf",
-    mime="application/rtf"
-)
+twoway (rarea ub lb quantile, color(gs12)) ///
+       (line coef quantile, lcolor(blue) lwidth(medthick)) ///
+       , title("MMQR Coefficients Across Quantiles") ///
+         subtitle("Variable: REER") ///
+         ytitle("Coefficient Estimate") ///
+         xtitle("Quantile (τ)") ///
+         legend(off)
+restore
+
+*--- Export full results for all variables
+export excel using "MMQR_full_results.xlsx", firstrow(variables) replace
+
+*--- Optional: view results in Stata
+list varname quantile coef se pval, clean
+
 
 # ============================================
 # Footer
