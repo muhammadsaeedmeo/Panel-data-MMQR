@@ -203,6 +203,20 @@ st.header("Method of Moments Quantile Regression (MMQR) - Machado & Santos Silva
 if 'dep_var' not in locals() or 'indep_vars' not in locals() or not indep_vars:
     st.warning("Please complete the correlation analysis first to select variables.")
 else:
+    # Check if variables exist in dataframe
+    missing_vars = [v for v in [dep_var] + indep_vars if v not in df.columns]
+    if missing_vars:
+        st.error(f"❌ Variables not found in dataframe: {', '.join(missing_vars)}")
+        st.stop()
+    
+    # Check data types
+    st.info("Checking data types...")
+    non_numeric = []
+    for var in [dep_var] + indep_vars:
+        if not pd.api.types.is_numeric_dtype(df[var]):
+            non_numeric.append(var)
+            st.warning(f"⚠️ Variable '{var}' is {df[var].dtype} - will be converted to numeric")
+    
     st.subheader("MMQR Configuration")
     
     col1, col2 = st.columns(2)
@@ -226,16 +240,52 @@ else:
         4. Correct standard errors and p-values
         """
         
-        # Prepare data
+        # ==========================================
+        # Data Validation and Preparation
+        # ==========================================
+        st.info("Validating and preparing data...")
+        
+        # Create clean copy of data with only needed variables
+        all_vars = [y_var] + x_vars
+        data_clean = data[all_vars].copy()
+        
+        # Convert all columns to numeric, coercing errors to NaN
+        for col in all_vars:
+            data_clean[col] = pd.to_numeric(data_clean[col], errors='coerce')
+        
+        # Drop any rows with NaN or infinite values
+        initial_rows = len(data_clean)
+        data_clean = data_clean.replace([np.inf, -np.inf], np.nan)
+        data_clean = data_clean.dropna()
+        
+        if len(data_clean) < initial_rows:
+            st.warning(f"Dropped {initial_rows - len(data_clean)} rows with missing/invalid values")
+        
+        if len(data_clean) < 30:
+            raise ValueError(f"Insufficient data: only {len(data_clean)} valid observations remaining. Need at least 30.")
+        
+        # Check for constant variables (zero variance)
+        for col in all_vars:
+            if data_clean[col].std() == 0:
+                raise ValueError(f"Variable '{col}' has zero variance. Cannot estimate model.")
+        
+        # Check for perfect collinearity
+        corr_matrix = data_clean[x_vars].corr()
+        if (corr_matrix.abs() > 0.99).sum().sum() > len(x_vars):
+            st.warning("⚠️ High collinearity detected between predictors. Results may be unstable.")
+        
+        # Prepare formula and data
         formula = f"{y_var} ~ {' + '.join(x_vars)}"
-        n_obs = len(data)
+        n_obs = len(data_clean)
         n_params = len(x_vars) + 1  # Including intercept
+        
+        st.success(f"✓ Data validated: {n_obs} observations, {len(x_vars)} predictors")
         
         # ==========================================
         # Step 1: Estimate Location Parameters (α)
         # ==========================================
         st.info(f"Estimating location parameters at τ = {reference_quantile}...")
-        location_model = quantreg(formula, data).fit(q=reference_quantile, vcov='robust')
+        location_model = quantreg(formula, data_clean).fit(q=reference_quantile, vcov='robust')
         alpha = location_model.params
         alpha_se = location_model.bse
         alpha_pvalues = location_model.pvalues
@@ -249,8 +299,8 @@ else:
         tau_high = 0.75
         tau_low = 0.25
         
-        model_high = quantreg(formula, data).fit(q=tau_high, vcov='robust')
-        model_low = quantreg(formula, data).fit(q=tau_low, vcov='robust')
+        model_high = quantreg(formula, data_clean).fit(q=tau_high, vcov='robust')
+        model_low = quantreg(formula, data_clean).fit(q=tau_low, vcov='robust')
         
         # CRITICAL: Use inverse normal CDF for h(τ)
         h_high = norm.ppf(tau_high)  # Φ^(-1)(0.75) ≈ 0.674
@@ -275,7 +325,7 @@ else:
             for b in range(n_boot):
                 try:
                     # Resample with replacement
-                    boot_data = data.sample(n=n_obs, replace=True)
+                    boot_data = data_clean.sample(n=n_obs, replace=True).reset_index(drop=True)
                     
                     # Estimate location
                     boot_loc = quantreg(formula, boot_data).fit(q=reference_quantile)
@@ -700,7 +750,6 @@ else:
         st.error(f"❌ MMQR estimation failed: {str(e)}")
         st.write("**Error details:**")
         st.exception(e)
-
 # ============================================
 # Footer
 # ============================================
