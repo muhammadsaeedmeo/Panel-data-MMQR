@@ -11,7 +11,7 @@ import statsmodels.api as sm
 from scipy.stats import shapiro
 from scipy import stats
 from io import BytesIO
-from docx import Document  # <-- add this line
+from docx import Document # <-- add this line
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -107,6 +107,44 @@ def plot_distribution(col):
         st.write("Sample too small for normality test.")
     st.markdown("---")
 
+# ---- Combined Plot for All Variables ----
+# THIS WAS THE MISSING FUNCTION DEFINITION (combined_distribution_plot)
+def combined_distribution_plot(df, numeric_cols):
+    n = len(numeric_cols)
+    if n == 0:
+        st.write("No plottable numeric variables remaining after filtering.")
+        return
+        
+    cols = 3
+    rows = int(np.ceil(n / cols))
+    
+    fig, axes = plt.subplots(rows, cols, figsize=(15, 4 * rows))
+    
+    # Handle single subplot case
+    if n == 1:
+        axes = np.array([axes])
+    elif isinstance(axes, np.ndarray):
+        axes = axes.flatten()
+    
+    for i, col in enumerate(numeric_cols):
+        data = df[col].dropna()
+        # Ensure we don't try to index beyond the color palette size
+        color_index = i % len(sns.color_palette("husl", n))
+        sns.kdeplot(data, fill=True, ax=axes[i], color=sns.color_palette("husl", 10)[color_index])
+        axes[i].set_title(col, fontsize=11)
+        axes[i].set_xlabel("")
+        axes[i].set_ylabel("Density")
+    
+    # Remove empty subplots
+    for j in range(i + 1, len(axes)):
+        fig.delaxes(axes[j])
+    
+    plt.suptitle("Combined Distribution of All Variables", fontsize=14, fontweight="bold")
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    st.pyplot(fig)
+    st.markdown("**Note:** The density plots show each variable’s overall distribution pattern for quick comparison.")
+# --- End of Missing Function ---
+
 
 # Define columns that represent time periods and should not be plotted
 # as continuous variables, regardless of casing.
@@ -125,7 +163,6 @@ if selected_col == "All Variables - Combined Summary Plot":
 else:
     st.subheader(f"Descriptive Analysis for {selected_col}")
     plot_distribution(selected_col)
-
 # ============================================
 # Section C: Correlation Analysis
 # ============================================
